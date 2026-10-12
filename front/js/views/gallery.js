@@ -1,7 +1,7 @@
 /**
  * 图片浏览页（首页）：分页、搜索、分类筛选、详情
  */
-import { pictureApi } from '../api.js';
+import { pictureApi, USE_CACHE } from '../api.js';
 import {
   $, $$, state, toast, escapeHtml, formatTime, renderPager, renderEmpty,
   debounce, CATEGORY_OPTIONS, REVIEW_STATUS, normalizePage,
@@ -25,7 +25,10 @@ async function load(el) {
   const grid = $('#grid', el);
   grid.innerHTML = '<div class="loading">加载中…</div>';
   try {
-    const data = await pictureApi.listVOByPage({ ...query });
+    // 开启缓存开关后走带多级缓存的接口，减少数据库压力
+    const data = USE_CACHE
+      ? await pictureApi.listVOByPageWithCache({ ...query })
+      : await pictureApi.listVOByPage({ ...query });
     renderGrid(el, normalizePage(data));
   } catch (e) {
     grid.innerHTML = renderEmpty(e.message);

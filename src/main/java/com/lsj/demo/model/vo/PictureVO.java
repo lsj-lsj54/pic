@@ -86,7 +86,15 @@ public class PictureVO implements Serializable {
      * 更新时间  
      */  
     private Date updateTime;  
-  
+
+    /**
+     * 审核状态：0-待审核; 1-通过; 2-拒绝
+     * <p>
+     * 前端「我的图片」用它在卡片角标上显示审核状态，
+     * 缺了它角标会一直落在「未知」分支。
+     */
+    private Integer reviewStatus;
+
     /**  
      * 创建用户信息  
      */  

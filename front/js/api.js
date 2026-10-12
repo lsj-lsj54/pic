@@ -14,6 +14,15 @@
 export const API_BASE = (typeof window !== 'undefined' && window.__API_BASE__)
   || 'http://localhost:8666/api';
 
+/**
+ * 首页列表是否使用带缓存的接口
+ * <p>
+ * 打开后走 /picture/list/page/vo/cache（Caffeine + Redis 多级缓存），
+ * 前提是服务端 Redis 可用；否则接口会连接失败，首页加载不出来。
+ * 本地没起 Redis 时保持 false 即可。
+ */
+export const USE_CACHE = (typeof window !== 'undefined' && window.__USE_CACHE__ === true);
+
 /** 业务状态码，与后端 ErrorCode 保持一致 */
 export const CODE = {
   SUCCESS: 0,
@@ -183,6 +192,16 @@ export const pictureApi = {
   }),
   /** 分页获取图片封装列表，后端限制 size <= 20 */
   listVOByPage: (query) => request('/picture/list/page/vo', {
+    method: 'POST',
+    body: cleanParams(query),
+  }),
+  /**
+   * 分页获取图片封装列表（带 Caffeine + Redis 多级缓存）
+   * <p>
+   * 后端需要 Redis 可用，否则该接口会连接失败。
+   * 由 config.js 里的 __USE_CACHE__ 控制前端是否走这条路径。
+   */
+  listVOByPageWithCache: (query) => request('/picture/list/page/vo/cache', {
     method: 'POST',
     body: cleanParams(query),
   }),

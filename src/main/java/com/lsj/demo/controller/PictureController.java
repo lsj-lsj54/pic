@@ -115,6 +115,8 @@ public class PictureController {
         // 操作数据库
         boolean result = pictureService.removeById(id);
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
+        // 删除后清缓存，避免首页仍显示已删除的图片
+        pictureService.clearPictureCache();
         return ResultUtils.success(true);
     }
 
@@ -149,6 +151,8 @@ public class PictureController {
         // 操作数据库
         boolean result = pictureService.updateById(picture);
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
+        // 更新后清缓存
+        pictureService.clearPictureCache();
         return ResultUtils.success(true);
     }
 
@@ -228,6 +232,25 @@ public class PictureController {
     }
 
     /**
+     * 分页获取图片列表（封装类，带多级缓存）
+     * <p>
+     * 与 /list/page/vo 的区别是多了一层 Caffeine + Redis 缓存，
+     * 适合首页这类「同样条件被反复查询」的场景。
+     *
+     * @param pictureQueryRequest 图片查询请求
+     * @param request             request 请求
+     * @return 图片封装类分页数据
+     */
+    @PostMapping("/list/page/vo/cache")
+    public BaseResponse<Page<PictureVO>> listPictureVOByPageWithCache(
+            @RequestBody PictureQueryRequest pictureQueryRequest,
+            HttpServletRequest request) {
+        ThrowUtils.throwIf(pictureQueryRequest == null, ErrorCode.PARAMS_ERROR);
+        return ResultUtils.success(
+                pictureService.listPictureVOByPageWithCache(pictureQueryRequest, request));
+    }
+
+    /**
      * 编辑图片（给用户使用）
      *
      * @param pictureEditRequest 图片编辑请求
@@ -261,6 +284,8 @@ public class PictureController {
         // 操作数据库
         boolean result = pictureService.updateById(picture);
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
+        // 编辑后清缓存（编辑会把图片打回待审核，列表结果随之变化）
+        pictureService.clearPictureCache();
         return ResultUtils.success(true);
     }
 

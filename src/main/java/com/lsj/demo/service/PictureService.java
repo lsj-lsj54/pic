@@ -72,6 +72,27 @@ public interface PictureService extends IService<Picture> {
     Page<PictureVO> getPictureVOPage(Page<Picture> picturePage, HttpServletRequest request);
 
     /**
+     * 分页获取图片 VO 对象（带多级缓存）
+     * <p>
+     * Caffeine（本地）→ Redis（分布式）→ 数据库，逐级回填。
+     * 只缓存普通用户可见的公开数据（强制 reviewStatus = 已通过）。
+     *
+     * @param pictureQueryRequest 图片查询请求
+     * @param request             request 请求
+     * @return 分页的 VO
+     */
+    Page<PictureVO> listPictureVOByPageWithCache(PictureQueryRequest pictureQueryRequest,
+                                                HttpServletRequest request);
+
+    /**
+     * 清除图片列表缓存
+     * <p>
+     * 图片增删改、审核之后都要调用，否则首页会一直返回旧数据。
+     * 目前清的是本机 Caffeine；Redis 侧靠 TTL 自然过期，详见实现类注释。
+     */
+    void clearPictureCache();
+
+    /**
      * 校验参数
      *
      * @param picture 需要校验的 picture 对象

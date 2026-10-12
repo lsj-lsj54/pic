@@ -153,25 +153,39 @@ VALUES (1, 'admin', '<yupi+密码 的 MD5>', '管理员', 'admin');
 
 ---
 
-## 三、后续接 Redis
+## 三、Redis 与列表缓存
 
-`docker-compose.yml` 里 Redis 已经配好并起了，只是**后端代码还没用到**。要用的时候分两步：
+`docker-compose.yml` 里 Redis 已经配好并起了，后端也**已经接上多级缓存**：
 
-**1. 加依赖**（Spring Boot 2.6 对应 `spring-boot-starter-data-redis`）：
-
-```xml
-<dependency>
-    <groupId>org.springframework.boot</groupId>
-    <artifactId>spring-boot-starter-data-redis</artifactId>
-</dependency>
+```
+Caffeine（本机，5 分钟）→ Redis（分布式，5~10 分钟随机）→ MySQL
 ```
 
-**2. 让应用读取 Redis 配置。** 连接信息已经通过环境变量注入了（`SPRING_REDIS_*`），Spring Boot 会自动绑定到 `spring.redis.*`，但**密码字段名要对上**：Spring Boot 2.6 用的是 `spring.redis.password`，而 compose 里注入的是 `SPRING_REDIS_PASSWORD` → 对应 `spring.redis.password`，正好匹配，不用额外配置。
+接口：`POST /picture/list/page/vo/cache`，只缓存普通用户可见的公开数据（强制 `reviewStatus = 已通过`），所以缓存内容与用户身份无关，可以共用同一个 key。
 
-Redis 建议用在这些地方：
+前端默认**走不带缓存的接口**，由 `front/config.js` 里的开关控制：
 
-- **首页图片列表缓存**：`/picture/list/page/vo` 是访问最频繁的接口，加 60 秒缓存能明显降低数据库压力
-- **登录态**：目前用 `HttpSession`（单机内存），以后要扩多台必须换成 Redis 存 session
+```js
+window.__USE_CACHE__ = false;   // 本地没起 Redis 时保持 false
+```
+
+用提供的 Nginx 配置部署时，`sub_filter` 会把它自动改成 `true`（因为服务器上 Redis 是起着的）。**如果你自己不打算跑 Redis，记得把 `deploy/nginx/default.conf` 里那条 `__USE_CACHE__` 的 sub_filter 去掉**，否则首页会请求一个需要 Redis 的接口而加载失败。
+
+本地想试缓存效果：
+
+```bash
+docker run -d --name redis -p 6379:6379 redis:7-alpine
+# 然后把 front/config.js 里的 __USE_CACHE__ 改成 true
+```
+
+### 两个已知的缓存行为
+
+1. **Redis 侧没有主动失效**。图片增删改、审核之后，代码会清掉本机 Caffeine（`clearPictureCache()`），但 Redis 里的数据靠 5~10 分钟 TTL 自然过期。单机部署下最多看到几分钟的旧列表，可以接受；**如果以后多实例部署、要求写入后立刻一致**，需要把 `PictureServiceImpl.clearPictureCache()` 里的注释落实 —— 一并删掉 Redis 中 `picture:listVO:` 开头的 key。
+2. **缓存 key 只覆盖公开列表**。因为强制了 `reviewStatus = 已通过`，管理端按状态筛选的请求不会被缓存，也不会互相污染。
+
+### Redis 后续还能用在哪
+
+- **登录态**：目前用 `HttpSession`（单机内存），以后扩多台必须换成 Redis 存 session
 - **批量抓取限流**：防止有人反复触发抓取
 
 ---

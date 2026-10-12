@@ -18,6 +18,16 @@ spring:
     active: local
   application:
     name: yu-picture-backend
+  # Redis：本地缓存之外的一级分布式缓存
+  # 没有启动 Redis 时，/picture/list/page/vo/cache 会报连接失败（其它接口不受影响）
+  redis:
+    host: localhost
+    port: 6379
+    # 本地没起 Redis 时不要卡住请求，快速失败
+    timeout: 2000ms
+    connect-timeout: 2000ms
+    lettuce:
+      shutdown-timeout: 100ms
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
     url: jdbc:mysql://localhost:3306/picture

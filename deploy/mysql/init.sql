@@ -2,9 +2,8 @@
 --
 -- 与 src/main/resources/application.yml 中的库名保持一致：picture
 -- 注意原来的两份脚本有几个坑，已在部署时统一到这里：
---   1. create_table_sql.sql 建的是 yu_picture，应用连的是 picture，对不上；
---   2. create_table_picture.sql 用 ALTER TABLE 追加审核字段，重复执行会报 Duplicate column；
---   3. 脚本里写死 `use picture`，容器初始化时容易因为库不存在而失败。
+--   1. create_table_picture.sql 用 ALTER TABLE 追加审核字段，重复执行会报 Duplicate column；
+--   2. 脚本里写死 `use picture`，容器初始化时容易因为库不存在而失败。
 -- 这里全部改成 CREATE TABLE IF NOT EXISTS，并把审核字段直接放进建表语句。
 
 CREATE DATABASE IF NOT EXISTS `picture`

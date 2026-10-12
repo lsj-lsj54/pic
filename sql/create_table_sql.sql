@@ -1,4 +1,4 @@
-create database if not exists `yu_picture` default character set utf8mb4 collate utf8mb4_unicode_ci;
+create database if not exists `picture` default character set utf8mb4 collate utf8mb4_unicode_ci;
 
 -- 用户表
 create table if not exists user

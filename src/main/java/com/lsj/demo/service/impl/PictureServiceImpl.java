@@ -2,7 +2,9 @@ package com.lsj.demo.service.impl;
 
 
 import cn.hutool.core.collection.CollUtil;
+import cn.hutool.core.lang.TypeReference;
 import cn.hutool.core.util.ObjUtil;
+import cn.hutool.core.util.RandomUtil;
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.core.util.URLUtil;
 import cn.hutool.json.JSONObject;
@@ -10,6 +12,8 @@ import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import com.lsj.demo.common.PicturePermissionUtils;
 import com.lsj.demo.exception.BusinessException;
 import com.lsj.demo.exception.ErrorCode;
@@ -36,17 +40,22 @@ import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
 import org.springframework.beans.BeanUtils;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.stereotype.Service;
+import org.springframework.util.DigestUtils;
 import org.springframework.web.multipart.MultipartFile;
 
 import javax.annotation.Resource;
 import javax.servlet.http.HttpServletRequest;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.Date;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 /**
@@ -59,13 +68,19 @@ import java.util.stream.Collectors;
 public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         implements PictureService {
 
-    /** 批量抓取一次最多允许的图片数，避免一次请求打爆对象存储和数据库 */
+    /**
+     * 批量抓取一次最多允许的图片数，避免一次请求打爆对象存储和数据库
+     */
     private static final int MAX_BATCH_COUNT = 30;
 
-    /** 抓取搜索页的超时时间，单位毫秒 */
+    /**
+     * 抓取搜索页的超时时间，单位毫秒
+     */
     private static final int FETCH_TIMEOUT_MILLIS = 10 * 1000;
 
-    /** 抓取搜索页使用的 UA，部分站点会拒绝空 UA 的请求 */
+    /**
+     * 抓取搜索页使用的 UA，部分站点会拒绝空 UA 的请求
+     */
     private static final String USER_AGENT =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                     + "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
@@ -76,6 +91,18 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
 
     @Resource
     private UploadFactory uploadFactory;
+
+    @Resource
+    private StringRedisTemplate stringRedisTemplate;
+
+    /** 图片列表缓存的 key 前缀 */
+    private static final String CACHE_KEY_PREFIX = "picture:listVO:";
+
+    /** 缓存基础过期时间（秒） */
+    private static final int CACHE_EXPIRE_BASE_SECONDS = 300;
+
+    /** 在基础过期时间上叠加的随机秒数，避免缓存同时失效 */
+    private static final int CACHE_EXPIRE_JITTER_SECONDS = 300;
 
     /**
      * 上传图片（本地文件）
@@ -164,6 +191,8 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         }
         boolean result = this.saveOrUpdate(picture);
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR, "图片上传失败");
+        // 数据变了，首页缓存要失效，否则会一直看到旧列表
+        clearPictureCache();
         return PictureVO.objToVo(picture);
     }
 
@@ -336,6 +365,8 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         updatePicture.setReviewTime(new Date());
         boolean result = this.updateById(updatePicture);
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
+        // 审核结果会影响「已过审」列表，缓存必须失效
+        clearPictureCache();
     }
 
     /**
@@ -517,5 +548,150 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
             return StrUtil.EMPTY;
         }
     }
+
+
+    /**
+     * 本地缓存（一级缓存）
+     * <p>
+     * 生命周期跟着应用走，重启即失效；多实例部署时各实例互不可见。
+     * 只用来挡住热点查询，真正的跨实例缓存在 Redis。
+     */
+    private final Cache<String, String> LOCAL_CACHE =
+            Caffeine.newBuilder().initialCapacity(1024)
+                    .maximumSize(10000L)
+                    // 本地缓存比 Redis 稍短，让两级缓存自然错开，避免同时失效
+                    .expireAfterWrite(5L, TimeUnit.MINUTES)
+                    .build();
+
+    /**
+     * 分页查询图片（带多级缓存）
+     * <p>
+     * 缓存策略：Caffeine（本地）→ Redis（分布式）→ 数据库，逐级回填。
+     * <p>
+     * 只对普通用户可见的公开数据做缓存：这里强制 reviewStatus = PASS，
+     * 所以缓存内容与用户身份无关，可以放心共用同一个 key。
+     *
+     * @param pictureQueryRequest 图片查询请求
+     * @param request             request 请求
+     * @return 图片封装类分页数据
+     */
+    @Override
+    public Page<PictureVO> listPictureVOByPageWithCache(PictureQueryRequest pictureQueryRequest,
+                                                        HttpServletRequest request) {
+        ThrowUtils.throwIf(pictureQueryRequest == null, ErrorCode.PARAMS_ERROR);
+        long current = pictureQueryRequest.getCurrent();
+        long size = pictureQueryRequest.getPageSize();
+        // 限制爬虫
+        ThrowUtils.throwIf(size > 20, ErrorCode.PARAMS_ERROR, "每页最多 20 条");
+        // 普通用户默认只能查看已过审的数据
+        pictureQueryRequest.setReviewStatus(PictureReviewStatusEnum.PASS.getValue());
+
+        // 构建缓存 key：只取影响结果的字段，保证序列化顺序稳定
+        String cacheKey = CACHE_KEY_PREFIX + DigestUtils.md5DigestAsHex(
+                buildCacheCondition(pictureQueryRequest).getBytes(StandardCharsets.UTF_8));
+
+        // 1. 本地缓存
+        String cachedValue = LOCAL_CACHE.getIfPresent(cacheKey);
+        if (cachedValue != null) {
+            log.debug("命中本地缓存，key = {}", cacheKey);
+            return parseCachedPage(cachedValue);
+        }
+
+        // 2. Redis 缓存
+        ValueOperations<String, String> valueOps = stringRedisTemplate.opsForValue();
+        String redisValue = valueOps.get(cacheKey);
+        if (redisValue != null) {
+            log.debug("命中 Redis 缓存，key = {}", cacheKey);
+            // 回填本地缓存，下次就不用走网络了
+            LOCAL_CACHE.put(cacheKey, redisValue);
+            return parseCachedPage(redisValue);
+        }
+
+        // 3. 查数据库
+        Page<Picture> picturePage = this.page(new Page<>(current, size),
+                this.getQueryWrapper(pictureQueryRequest));
+        Page<PictureVO> pictureVOPage = this.getPictureVOPage(picturePage, request);
+
+        // 4. 回填两级缓存
+        String cacheValue = serializePage(pictureVOPage);
+        // 5 - 10 分钟随机过期，防止同一时刻大批 key 一起失效造成缓存雪崩
+        int cacheExpireTime = CACHE_EXPIRE_BASE_SECONDS + RandomUtil.randomInt(0, CACHE_EXPIRE_JITTER_SECONDS);
+        valueOps.set(cacheKey, cacheValue, cacheExpireTime, TimeUnit.SECONDS);
+        LOCAL_CACHE.put(cacheKey, cacheValue);
+
+        return pictureVOPage;
+    }
+
+    /**
+     * 清除本地图片缓存
+     * <p>
+     * 图片增删改（上传、编辑、删除、审核）后调用，避免首页一直看到旧数据。
+     * <p>
+     * 注意：这里只清了本机的 Caffeine。Redis 里的数据靠 5~10 分钟的 TTL 自然过期，
+     * 单机部署下影响可以接受；如果以后多实例部署、要求写入后立刻一致，
+     * 需要在这里把 Redis 中 {@link #CACHE_KEY_PREFIX} 开头的 key 一并删掉。
+     */
+    @Override
+    public void clearPictureCache() {
+        LOCAL_CACHE.invalidateAll();
+        log.debug("本地图片缓存已清除");
+    }
+    /**
+     * 拼装参与缓存的查询条件
+     * <p>
+     * 不用 JSON 序列化整个请求对象：字段顺序、null 处理稍有变化就会导致 key 变化，
+     * 明明是同一次查询却缓存不命中。这里显式列出真正影响结果的字段。
+     *
+     * @param queryRequest 查询请求
+     * @return 用于计算 md5 的条件串
+     */
+    private String buildCacheCondition(PictureQueryRequest queryRequest) {
+        StringBuilder sb = new StringBuilder(128);
+        sb.append("current=").append(queryRequest.getCurrent())
+                .append("&size=").append(queryRequest.getPageSize())
+                .append("&reviewStatus=").append(queryRequest.getReviewStatus())
+                .append("&searchText=").append(StrUtil.nullToEmpty(queryRequest.getSearchText()))
+                .append("&category=").append(StrUtil.nullToEmpty(queryRequest.getCategory()))
+                .append("&picFormat=").append(StrUtil.nullToEmpty(queryRequest.getPicFormat()))
+                .append("&userId=").append(queryRequest.getUserId())
+                .append("&name=").append(StrUtil.nullToEmpty(queryRequest.getName()))
+                .append("&introduction=").append(StrUtil.nullToEmpty(queryRequest.getIntroduction()))
+                .append("&sortField=").append(StrUtil.nullToEmpty(queryRequest.getSortField()))
+                // 统一成小写再比较，避免 "ASC" 与 "asc" 生成两个 key
+                .append("&sortOrder=").append(StrUtil.nullToEmpty(queryRequest.getSortOrder()).toLowerCase());
+        if (CollUtil.isNotEmpty(queryRequest.getTags())) {
+            // 标签按字典序排序，顺序不同不应视作不同查询
+            sb.append("&tags=").append(queryRequest.getTags().stream()
+                    .sorted()
+                    .collect(Collectors.joining(",")));
+        }
+        return sb.toString();
+    }
+
+    /**
+     * 把分页对象序列化成缓存字符串
+     *
+     * @param page 分页对象
+     * @return JSON 字符串
+     */
+    private String serializePage(Page<PictureVO> page) {
+        return JSONUtil.toJsonStr(page);
+    }
+
+    /**
+     * 把缓存字符串还原成分页对象
+     * <p>
+     * 必须用 TypeReference 指定泛型：直接 toBean(xxx, Page.class) 会丢掉
+     * records 里的泛型信息，返回的 Page 的 records 是 JSONObject 列表，
+     * 遍历时取字段会直接抛异常。
+     *
+     * @param cachedValue 缓存中的 JSON 字符串
+     * @return 分页对象
+     */
+    private Page<PictureVO> parseCachedPage(String cachedValue) {
+        return JSONUtil.toBean(cachedValue, new TypeReference<Page<PictureVO>>() {
+        }, false);
+    }
+
 
 }
