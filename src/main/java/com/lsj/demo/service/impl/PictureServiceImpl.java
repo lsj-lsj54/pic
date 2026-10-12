@@ -59,8 +59,6 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
     @Resource
     private UserService userService;
 
-    @Resource
-    private PictureService pictureService;
 
     @Override
     public PictureVO uploadPicture(MultipartFile multipartFile, PictureUploadRequest pictureUploadRequest, User loginUser) {
@@ -237,14 +235,14 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         User loginUser = userService.getLoginUser(request);
         long id = deleteRequest.getId();
         // 判断是否存在
-        Picture oldPicture = pictureService.getById(id);
+        Picture oldPicture = this.getById(id);
         ThrowUtils.throwIf(oldPicture == null, ErrorCode.NOT_FOUND_ERROR);
         // 仅本人或管理员可删除
         if (!oldPicture.getUserId().equals(loginUser.getId()) && !userService.isAdmin(loginUser)) {
             throw new BusinessException(ErrorCode.NO_AUTH_ERROR);
         }
         // 操作数据库
-        boolean result = pictureService.removeById(id);
+        boolean result = this.removeById(id);
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
         return ResultUtils.success(true);
     }
@@ -264,16 +262,16 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         // 注意将 list 转为 string
         picture.setTags(JSONUtil.toJsonStr(pictureUpdateRequest.getTags()));
         // 数据校验
-        pictureService.validPicture(picture);
+        this.validPicture(picture);
         // 判断是否存在
         long id = pictureUpdateRequest.getId();
-        Picture oldPicture = pictureService.getById(id);
+        Picture oldPicture = this.getById(id);
         ThrowUtils.throwIf(oldPicture == null, ErrorCode.NOT_FOUND_ERROR);
         // 补充审核参数
         User loginUser = userService.getLoginUser(request);
-        pictureService.fillReviewParams(picture, loginUser);
+        this.fillReviewParams(picture, loginUser);
         // 操作数据库
-        boolean result = pictureService.updateById(picture);
+        boolean result = this.updateById(picture);
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
         return ResultUtils.success(true);
 
@@ -288,7 +286,7 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
     public BaseResponse<Picture> getPictureById(long id, HttpServletRequest request) {
         ThrowUtils.throwIf(id <= 0, ErrorCode.PARAMS_ERROR);
         // 查询数据库
-        Picture picture = pictureService.getById(id);
+        Picture picture = this.getById(id);
         ThrowUtils.throwIf(picture == null, ErrorCode.NOT_FOUND_ERROR);
         // 获取封装类
         return ResultUtils.success(picture);
@@ -301,10 +299,10 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
     public BaseResponse<PictureVO> getPictureVOById(long id, HttpServletRequest request) {
         ThrowUtils.throwIf(id <= 0, ErrorCode.PARAMS_ERROR);
         // 查询数据库
-        Picture picture = pictureService.getById(id);
+        Picture picture = this.getById(id);
         ThrowUtils.throwIf(picture == null, ErrorCode.NOT_FOUND_ERROR);
         // 获取封装类
-        return ResultUtils.success(pictureService.getPictureVO(picture, request));
+        return ResultUtils.success(this.getPictureVO(picture, request));
     }
 
     /**
@@ -316,8 +314,8 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         long current = pictureQueryRequest.getCurrent();
         long size = pictureQueryRequest.getPageSize();
         // 查询数据库
-        Page<Picture> picturePage = pictureService.page(new Page<>(current, size),
-                pictureService.getQueryWrapper(pictureQueryRequest));
+        Page<Picture> picturePage = this.page(new Page<>(current, size),
+                this.getQueryWrapper(pictureQueryRequest));
         return ResultUtils.success(picturePage);
     }
 
@@ -334,10 +332,10 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         // 普通用户默认只能查看已过审的数据
         pictureQueryRequest.setReviewStatus(PictureReviewStatusEnum.PASS.getValue());
         // 查询数据库
-        Page<Picture> picturePage = pictureService.page(new Page<>(current, size),
-                pictureService.getQueryWrapper(pictureQueryRequest));
+        Page<Picture> picturePage = this.page(new Page<>(current, size),
+                this.getQueryWrapper(pictureQueryRequest));
         // 获取封装类
-        return ResultUtils.success(pictureService.getPictureVOPage(picturePage, request));
+        return ResultUtils.success(this.getPictureVOPage(picturePage, request));
     }
 
     /**
@@ -356,20 +354,20 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         // 设置编辑时间
         picture.setEditTime(new Date());
         // 数据校验
-        pictureService.validPicture(picture);
+        this.validPicture(picture);
         User loginUser = userService.getLoginUser(request);
         // 判断是否存在
         long id = pictureEditRequest.getId();
-        Picture oldPicture = pictureService.getById(id);
+        Picture oldPicture = this.getById(id);
         ThrowUtils.throwIf(oldPicture == null, ErrorCode.NOT_FOUND_ERROR);
         // 仅本人或管理员可编辑
         if (!oldPicture.getUserId().equals(loginUser.getId()) && !userService.isAdmin(loginUser)) {
             throw new BusinessException(ErrorCode.NO_AUTH_ERROR);
         }
         // 补充审核参数
-        pictureService.fillReviewParams(picture, loginUser);
+        this.fillReviewParams(picture, loginUser);
         // 操作数据库
-        boolean result = pictureService.updateById(picture);
+        boolean result = this.updateById(picture);
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
         return ResultUtils.success(true);
     }
