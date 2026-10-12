@@ -54,6 +54,13 @@ public class FileManager {
             multipartFile.transferTo(file);
             // 上传图片
             PutObjectResult putObjectResult = cosManager.putPictureObject(uploadPath, file);
+            // 对象存储未返回图片信息时给出明确原因，避免直接空指针后只报笼统的「上传失败」
+            if (putObjectResult.getCiUploadResult() == null
+                    || putObjectResult.getCiUploadResult().getOriginalInfo() == null
+                    || putObjectResult.getCiUploadResult().getOriginalInfo().getImageInfo() == null) {
+                log.error("对象存储未返回图片信息，文件大小 = {} 字节，路径 = {}", file.length(), uploadPath);
+                throw new BusinessException(ErrorCode.SYSTEM_ERROR, "图片处理失败，请确认文件是有效的图片");
+            }
             ImageInfo imageInfo = putObjectResult.getCiUploadResult().getOriginalInfo().getImageInfo();
             // 封装返回结果
             UploadPictureResult uploadPictureResult = new UploadPictureResult();
@@ -68,8 +75,10 @@ public class FileManager {
             uploadPictureResult.setPicSize(FileUtil.size(file));
             uploadPictureResult.setUrl(cosClientConfig.getHost() + "/" + uploadPath);
             return uploadPictureResult;
+        } catch (BusinessException e) {
+            throw e;
         } catch (Exception e) {
-            log.error("图片上传到对象存储失败", e);
+            log.error("图片上传到对象存储失败，文件大小 = {} 字节", multipartFile.getSize(), e);
             throw new BusinessException(ErrorCode.SYSTEM_ERROR, "上传失败");
         } finally {
             this.deleteTempFile(file);

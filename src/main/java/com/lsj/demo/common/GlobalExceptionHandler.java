@@ -5,7 +5,11 @@ import com.lsj.demo.exception.ErrorCode;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
 
+/**
+ * 全局异常处理
+ */
 @RestControllerAdvice
 @Slf4j
 public class GlobalExceptionHandler {
@@ -20,6 +24,22 @@ public class GlobalExceptionHandler {
     public BaseResponse<?> businessExceptionHandler(BusinessException e) {
         log.error("BusinessException", e);
         return ResultUtils.error(e.getCode(), e.getMessage());
+    }
+
+    /**
+     * 处理上传文件过大的异常
+     * <p>
+     * 这类异常原本会被下面的 RuntimeException 分支吞掉，只返回笼统的「系统错误」，
+     * 让人误以为是后端挂了。这里单独处理，把体积限制直接告知前端。
+     * 相关配置见 application.yml 的 spring.servlet.multipart。
+     *
+     * @param e 上传体积超限异常
+     * @return 统一响应，说明是文件过大
+     */
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    public BaseResponse<?> maxUploadSizeExceptionHandler(MaxUploadSizeExceededException e) {
+        log.error("MaxUploadSizeExceededException: {}", e.getMessage());
+        return ResultUtils.error(ErrorCode.PARAMS_ERROR, "上传文件过大，请压缩后重试");
     }
 
     /**

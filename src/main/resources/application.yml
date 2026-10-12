@@ -2,9 +2,16 @@ server:
   port: 8666
   servlet:
     context-path: /api
-    # 开放更大的文件上传体积
+    # 文件上传体积限制
+    # 两个都必须显式配置：max-file-size 管单个文件，max-request-size 管整个 multipart 请求体。
+    # 只配 max-file-size 时，multipart 解析仍会被请求体上限拦下，
+    # 表现为「超过 1MB 的文件上传必失败」，且错误信息被包装成笼统的系统错误，很难排查。
     multipart:
       max-file-size: 10MB
+      max-request-size: 10MB
+  tomcat:
+    # 请求被拒绝时允许吞掉的字节数，避免大文件失败后连接被直接断开
+    max-swallow-size: 20MB
 
 spring:
   profiles:

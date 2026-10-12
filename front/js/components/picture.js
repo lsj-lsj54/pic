@@ -1,0 +1,448 @@
+/**
+ * 图片相关公共组件：上传弹窗、压缩、详情弹窗、编辑弹窗
+ */
+import { pictureApi } from '../api.js';
+import {
+  $, $$, state, toast, showModal, closeModal, escapeHtml,
+  getFormValues, formatTime, formatSize, CATEGORY_OPTIONS,
+} from '../ui.js';
+
+/** 允许上传的后端格式，须与 FileManager.validPicture 保持一致 */
+const ALLOW_FORMAT = ['jpg', 'jpeg', 'png', 'webp'];
+
+/** 后端单文件上限 2MB（FileManager 中是 2 * 1024 * 1024） */
+const MAX_SIZE = 2 * 1024 * 1024;
+
+/**
+ * 前端压缩的触发体积
+ * <p>
+ * 实测后端 multipart 解析曾在 1MiB 处拒绝请求（已通过 application.yml 放开通到 10MB），
+ * 这里仍保守地压在 900KB 以内，保证换任何环境都不会因为请求体过大而失败。
+ */
+const COMPRESS_TRIGGER = 900 * 1024;
+
+/** 压缩后允许的最大体积 */
+const COMPRESS_TARGET = 900 * 1024;
+
+/** 像素数超过该值就压缩（约 1600 × 1600） */
+const COMPRESS_EDGE = 1600;
+
+/** 压缩后最长边 */
+const COMPRESS_TARGET_EDGE = 1280;
+
+/** 压缩质量候选，从高到低尝试，尽量保住画质 */
+const QUALITY_STEPS = [0.9, 0.82, 0.72, 0.62, 0.5];
+
+/** canvas 是否支持 webp 编码（webp 体积更小且支持透明） */
+const SUPPORTS_WEBP = (() => {
+  try {
+    return document.createElement('canvas').toDataURL('image/webp').startsWith('data:image/webp');
+  } catch (e) {
+    return false;
+  }
+})();
+
+/** 取文件后缀（小写） */
+function getSuffix(filename) {
+  const index = filename.lastIndexOf('.');
+  return index === -1 ? '' : filename.slice(index + 1).toLowerCase();
+}
+
+/** 创建对象 URL 并在用完后释放 */
+function releaseUrl(url) {
+  if (url && url.startsWith('blob:')) {
+    URL.revokeObjectURL(url);
+  }
+}
+
+/** Promise 化的 canvas.toBlob */
+function canvasToBlob(canvas, type, quality) {
+  return new Promise((resolve) => {
+    canvas.toBlob((blob) => resolve(blob), type, quality);
+  });
+}
+
+/**
+ * 压缩图片：缩到目标边长并逐档降低质量，直到体积达标
+ * <p>
+ * 同时支持两种编码格式，保证不丢透明：
+ *  - webp：体积更小且支持透明，优先使用；
+ *  - jpeg：浏览器不支持 webp 时兜底，先铺白底避免透明区域变黑。
+ *
+ * @param {File} file 原图片
+ * @returns {Promise<File>} 压缩后的 File，无需压缩或压缩失败时返回原文件
+ */
+export function compressImage(file) {
+  return new Promise((resolve) => {
+    const objectUrl = URL.createObjectURL(file);
+    const image = new Image();
+
+    image.onload = async () => {
+      try {
+        const { width, height } = image;
+        const needCompress = file.size > COMPRESS_TRIGGER
+          || Math.max(width, height) > COMPRESS_EDGE;
+        if (!needCompress) {
+          resolve(file);
+          return;
+        }
+
+        const scale = Math.min(1, COMPRESS_TARGET_EDGE / Math.max(width, height));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(width * scale));
+        canvas.height = Math.max(1, Math.round(height * scale));
+        const ctx = canvas.getContext('2d');
+
+        const type = SUPPORTS_WEBP ? 'image/webp' : 'image/jpeg';
+        const suffix = SUPPORTS_WEBP ? 'webp' : 'jpg';
+        if (type === 'image/jpeg') {
+          // jpeg 不支持透明，先铺白底，否则透明区域会变成黑色
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+        }
+        ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+
+        let best = null;
+        for (const quality of QUALITY_STEPS) {
+          const blob = await canvasToBlob(canvas, type, quality);
+          if (!blob) {
+            break;
+          }
+          best = blob;
+          if (blob.size <= COMPRESS_TARGET) {
+            break;
+          }
+        }
+
+        if (!best) {
+          resolve(file);
+          return;
+        }
+        const name = file.name.replace(/\.[^.]+$/, '') + '.' + suffix;
+        resolve(new File([best], name, { type }));
+      } finally {
+        releaseUrl(objectUrl);
+      }
+    };
+
+    image.onerror = () => {
+      releaseUrl(objectUrl);
+      resolve(file);
+    };
+    image.src = objectUrl;
+  });
+}
+
+/**
+ * 打开上传弹窗
+ *
+ * @param {object}   options
+ * @param {string}   [options.pictureId] 图片 id，传了表示覆盖上传
+ * @param {Function} [options.onSuccess] 上传成功回调
+ */
+export function openUploadModal({ pictureId, onSuccess } = {}) {
+  const isOverwrite = !!pictureId;
+  const modal = showModal({
+    title: isOverwrite ? '重新上传图片' : '上传图片',
+    width: '640px',
+    content: `
+      <div class="upload-box" id="drop-area">
+        <input type="file" id="file-input" accept="image/jpeg,image/png,image/webp"
+               ${isOverwrite ? '' : 'multiple'} hidden>
+        <button class="btn btn-primary" type="button" id="pick-btn">选择图片</button>
+        <p class="upload-tip">支持 jpg / jpeg / png / webp，单张不超过 2MB；过大的图片会在本地自动压缩${isOverwrite ? '' : '，可多选'}</p>
+      </div>
+      <div class="upload-list" id="file-list"></div>
+      <div class="modal-foot">
+        <button class="btn" type="button" data-modal-close>取消</button>
+        <button class="btn btn-primary" id="start-upload" type="button" disabled>开始上传</button>
+      </div>`,
+  });
+
+  const input = $('#file-input', modal);
+  const listEl = $('#file-list', modal);
+  const startBtn = $('#start-upload', modal);
+  const dropArea = $('#drop-area', modal);
+
+  /** 待上传任务：{ file, preview, status, progress } */
+  let tasks = [];
+
+  /** 重绘待上传列表 */
+  function renderList() {
+    if (tasks.length === 0) {
+      listEl.innerHTML = '';
+      startBtn.disabled = true;
+      return;
+    }
+    listEl.innerHTML = tasks.map((task, index) => `
+      <div class="upload-item">
+        <img src="${task.preview}" alt="预览">
+        <div class="upload-item-main">
+          <div class="upload-item-name" title="${escapeHtml(task.file.name)}">
+            ${escapeHtml(task.file.name)}
+          </div>
+          <div class="upload-item-size">
+            ${formatSize(task.file.size)}
+            <span class="upload-status ${task.status}">${task.statusText}</span>
+          </div>
+        </div>
+        <button class="icon-btn" data-remove="${index}" type="button"
+          ${task.status === 'uploading' ? 'disabled' : ''}>✕</button>
+      </div>`).join('');
+    startBtn.disabled = tasks.some((task) => task.status === 'uploading') || tasks.length === 0;
+    $$('[data-remove]', listEl).forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const index = Number(btn.dataset.remove);
+        releaseUrl(tasks[index].preview);
+        tasks.splice(index, 1);
+        renderList();
+      });
+    });
+  }
+
+  /** 接收文件，做格式校验后加入待上传列表 */
+  async function addFiles(fileList) {
+    const files = Array.from(fileList);
+    if (files.length === 0) {
+      return;
+    }
+    for (const file of files) {
+      if (!ALLOW_FORMAT.includes(getSuffix(file.name))) {
+        toast(`「${file.name}」格式不支持，仅支持 jpg / png / webp`, 'error');
+        continue;
+      }
+      const compressed = await compressImage(file);
+      // 压缩后仍超出体积上限的直接拦下，避免白白发一次请求
+      if (compressed.size > MAX_SIZE) {
+        toast(
+          `「${file.name}」压缩后仍有 ${formatSize(compressed.size)}，超过单张 2MB 上限，请先裁剪或导出更小的图片`,
+          'error',
+        );
+        continue;
+      }
+      tasks.push({
+        file: compressed,
+        preview: URL.createObjectURL(compressed),
+        status: 'ready',
+        statusText: '待上传',
+      });
+    }
+    if (isOverwrite && tasks.length > 1) {
+      // 覆盖上传只允许一张，保留最后选择的
+      while (tasks.length > 1) {
+        releaseUrl(tasks.shift().preview);
+      }
+    }
+    renderList();
+  }
+
+  $('#pick-btn', modal).addEventListener('click', () => input.click());
+  input.addEventListener('change', () => {
+    addFiles(input.files);
+    input.value = '';
+  });
+
+  // 拖拽上传
+  dropArea.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    dropArea.classList.add('dragging');
+  });
+  dropArea.addEventListener('dragleave', () => dropArea.classList.remove('dragging'));
+  dropArea.addEventListener('drop', (e) => {
+    e.preventDefault();
+    dropArea.classList.remove('dragging');
+    addFiles(e.dataTransfer.files);
+  });
+
+  startBtn.addEventListener('click', async () => {
+    const pending = tasks.filter((task) => task.status !== 'done');
+    if (pending.length === 0) {
+      return;
+    }
+    startBtn.disabled = true;
+    let success = 0;
+
+    for (const task of pending) {
+      task.status = 'uploading';
+      task.statusText = '上传中…';
+      renderList();
+      try {
+        await pictureApi.upload(task.file, pictureId);
+        task.status = 'done';
+        task.statusText = '已完成';
+        success += 1;
+        releaseUrl(task.preview);
+      } catch (e) {
+        task.status = 'failed';
+        task.statusText = e.message;
+      }
+      renderList();
+    }
+
+    if (success > 0) {
+      toast(isOverwrite ? '重新上传成功' : `成功上传 ${success} 张图片`, 'success');
+      if (typeof onSuccess === 'function') {
+        onSuccess();
+      }
+      closeModal();
+    } else {
+      startBtn.disabled = false;
+    }
+  });
+
+  // 弹窗关闭时释放所有预览地址
+  const observer = new MutationObserver(() => {
+    if (!$('#drop-area')) {
+      tasks.forEach((task) => releaseUrl(task.preview));
+      tasks = [];
+      observer.disconnect();
+    }
+  });
+  observer.observe($('#modal-root'), { childList: true });
+  return modal;
+}
+
+/** 当前用户是否可以编辑该图片（本人或管理员） */
+function canEdit(picture) {
+  if (!state.isLogin() || !picture) {
+    return false;
+  }
+  return state.isAdmin() || String(picture.userId) === String(state.getCurrentUser().id);
+}
+
+/**
+ * 图片详情弹窗
+ *
+ * @param {string|number} id      图片 id
+ * @param {object}        options
+ * @param {Function}      [options.onChanged] 编辑或重新上传成功后的回调
+ */
+export async function openPictureDetail(id, { onChanged } = {}) {
+  let picture;
+  try {
+    picture = await pictureApi.getVOById(id);
+  } catch (e) {
+    toast(e.message, 'error');
+    return;
+  }
+
+  const editable = canEdit(picture);
+  const tags = (picture.tags || []).map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join(' ');
+  const modal = showModal({
+    title: picture.name || '图片详情',
+    width: '760px',
+    content: `
+      <div class="detail">
+        <div class="detail-img">
+          <img src="${escapeHtml(picture.url)}" alt="${escapeHtml(picture.name)}">
+        </div>
+        <div class="detail-info">
+          <div class="detail-row"><span>简介</span><p>${escapeHtml(picture.introduction) || '暂无简介'}</p></div>
+          <div class="detail-row"><span>分类</span><p>${escapeHtml(picture.category) || '未分类'}</p></div>
+          <div class="detail-row"><span>标签</span><p>${tags || '无'}</p></div>
+          <div class="detail-row"><span>尺寸</span><p>${picture.picWidth || '-'} × ${picture.picHeight || '-'}</p></div>
+          <div class="detail-row"><span>体积</span><p>${formatSize(picture.picSize)}</p></div>
+          <div class="detail-row"><span>上传者</span><p>${escapeHtml(picture.user
+    ? picture.user.userName || picture.user.userAccount : '-')}</p></div>
+          <div class="detail-row"><span>上传时间</span><p>${formatTime(picture.createTime)}</p></div>
+          <div class="detail-actions">
+            <a class="btn btn-sm" href="${escapeHtml(picture.url)}" target="_blank" rel="noopener">查看原图</a>
+            ${editable ? '<button class="btn btn-sm btn-primary" id="detail-edit" type="button">编辑信息</button>' : ''}
+            ${editable ? '<button class="btn btn-sm" id="detail-reupload" type="button">重新上传</button>' : ''}
+          </div>
+        </div>
+      </div>`,
+  });
+
+  const editBtn = $('#detail-edit', modal);
+  if (editBtn) {
+    editBtn.addEventListener('click', () => {
+      closeModal();
+      openEditModal(picture, { onSuccess: onChanged });
+    });
+  }
+  const reuploadBtn = $('#detail-reupload', modal);
+  if (reuploadBtn) {
+    reuploadBtn.addEventListener('click', () => {
+      closeModal();
+      openUploadModal({
+        pictureId: picture.id,
+        onSuccess: onChanged,
+      });
+    });
+  }
+}
+
+/**
+ * 编辑图片信息弹窗
+ *
+ * @param {object}   picture             图片对象
+ * @param {object}   options
+ * @param {Function} [options.onSuccess] 保存成功回调
+ */
+export function openEditModal(picture, { onSuccess } = {}) {
+  const categoryOptions = CATEGORY_OPTIONS
+    .map((item) => `<option value="${item}" ${item === picture.category ? 'selected' : ''}>${item}</option>`)
+    .join('');
+  const modal = showModal({
+    title: '编辑图片信息',
+    content: `
+      <form id="edit-form" class="form">
+        <label class="field">
+          <span>图片名称</span>
+          <input name="name" type="text" value="${escapeHtml(picture.name)}" maxlength="80" required>
+        </label>
+        <label class="field">
+          <span>简介</span>
+          <textarea name="introduction" rows="3" maxlength="800"
+            placeholder="最多 800 字">${escapeHtml(picture.introduction)}</textarea>
+        </label>
+        <label class="field">
+          <span>分类</span>
+          <select name="category">
+            <option value="">未分类</option>
+            ${categoryOptions}
+          </select>
+        </label>
+        <label class="field">
+          <span>标签</span>
+          <input name="tags" type="text" placeholder="用英文逗号分隔，如：风景,海边"
+                 value="${escapeHtml((picture.tags || []).join(','))}">
+        </label>
+        <div class="modal-foot">
+          <button class="btn" type="button" data-modal-close>取消</button>
+          <button class="btn btn-primary" type="submit">保存</button>
+        </div>
+      </form>`,
+  });
+
+  $('#edit-form', modal).addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const values = getFormValues(e.target);
+    const tags = values.tags
+      ? values.tags.split(',').map((tag) => tag.trim()).filter(Boolean)
+      : [];
+    const payload = {
+      id: picture.id,
+      name: values.name,
+      introduction: values.introduction,
+      category: values.category,
+      tags,
+    };
+    try {
+      // 管理员走 /picture/update，普通用户走 /picture/edit
+      if (state.isAdmin()) {
+        await pictureApi.update(payload);
+      } else {
+        await pictureApi.edit(payload);
+      }
+      closeModal();
+      toast('保存成功', 'success');
+      if (typeof onSuccess === 'function') {
+        onSuccess();
+      }
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  });
+}
