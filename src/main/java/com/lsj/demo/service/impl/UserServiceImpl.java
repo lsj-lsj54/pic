@@ -245,7 +245,9 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
         queryWrapper.like(StrUtil.isNotBlank(userAccount), "userAccount", userAccount);
         queryWrapper.like(StrUtil.isNotBlank(userName), "userName", userName);
         queryWrapper.like(StrUtil.isNotBlank(userProfile), "userProfile", userProfile);
-        queryWrapper.orderBy(StrUtil.isNotBlank(sortOrder), sortOrder.equals("ascend"), sortField);
+        // 常量写在前面：sortOrder 为 null 时不会抛 NPE
+        // （写成 sortOrder.equals("ascend") 会在 isNotBlank 拦下之前就抛异常）
+        queryWrapper.orderBy(StrUtil.isNotBlank(sortOrder), "ascend".equals(sortOrder), sortField);
         return queryWrapper;
     }
 

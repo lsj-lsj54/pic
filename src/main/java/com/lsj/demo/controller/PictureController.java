@@ -12,11 +12,7 @@ import com.lsj.demo.exception.BusinessException;
 import com.lsj.demo.exception.ErrorCode;
 import com.lsj.demo.exception.ThrowUtils;
 import com.lsj.demo.model.constant.UserConstant;
-import com.lsj.demo.model.dto.picture.PictureEditRequest;
-import com.lsj.demo.model.dto.picture.PictureQueryRequest;
-import com.lsj.demo.model.dto.picture.PictureReviewRequest;
-import com.lsj.demo.model.dto.picture.PictureUpdateRequest;
-import com.lsj.demo.model.dto.picture.PictureUploadRequest;
+import com.lsj.demo.model.dto.picture.*;
 import com.lsj.demo.model.entity.Picture;
 import com.lsj.demo.model.entity.User;
 import com.lsj.demo.model.enums.FileUploadEnum;
@@ -284,4 +280,17 @@ public class PictureController {
         pictureService.doPictureReview(pictureReviewRequest, loginUser);
         return ResultUtils.success(true);
     }
+
+
+    @PostMapping("/upload/batch")
+    @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
+    public BaseResponse<Integer> uploadPictureByBatch(
+            @RequestBody PictureUploadByBatchRequest pictureUploadByBatchRequest,
+            HttpServletRequest request) {
+        ThrowUtils.throwIf(pictureUploadByBatchRequest == null, ErrorCode.PARAMS_ERROR);
+        User loginUser = userService.getLoginUser(request);
+        int uploadCount = pictureService.uploadPictureByBatch(pictureUploadByBatchRequest, loginUser);
+        return ResultUtils.success(uploadCount);
+    }
+
 }

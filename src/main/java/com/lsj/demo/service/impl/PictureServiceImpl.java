@@ -4,6 +4,9 @@ package com.lsj.demo.service.impl;
 import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.util.ObjUtil;
 import cn.hutool.core.util.StrUtil;
+import cn.hutool.core.util.URLUtil;
+import cn.hutool.json.JSONObject;
+import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
@@ -15,6 +18,7 @@ import com.lsj.demo.manager.factory.UploadFactory;
 import com.lsj.demo.manager.uplode.PictureUploadTemplate;
 import com.lsj.demo.model.dto.picture.PictureQueryRequest;
 import com.lsj.demo.model.dto.picture.PictureReviewRequest;
+import com.lsj.demo.model.dto.picture.PictureUploadByBatchRequest;
 import com.lsj.demo.model.dto.picture.PictureUploadRequest;
 import com.lsj.demo.model.entity.User;
 import com.lsj.demo.mapper.PictureMapper;
@@ -26,13 +30,20 @@ import com.lsj.demo.model.vo.PictureVO;
 import com.lsj.demo.model.vo.UserVO;
 import com.lsj.demo.service.PictureService;
 import com.lsj.demo.service.UserService;
+import lombok.extern.slf4j.Slf4j;
+import org.jsoup.Jsoup;
+import org.jsoup.nodes.Document;
+import org.jsoup.nodes.Element;
+import org.jsoup.select.Elements;
 import org.springframework.beans.BeanUtils;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
 import javax.annotation.Resource;
 import javax.servlet.http.HttpServletRequest;
+import java.io.IOException;
 import java.util.Date;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -44,8 +55,20 @@ import java.util.stream.Collectors;
  * @createDate 2026-10-12 10:48:24
  */
 @Service
+@Slf4j
 public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         implements PictureService {
+
+    /** 批量抓取一次最多允许的图片数，避免一次请求打爆对象存储和数据库 */
+    private static final int MAX_BATCH_COUNT = 30;
+
+    /** 抓取搜索页的超时时间，单位毫秒 */
+    private static final int FETCH_TIMEOUT_MILLIS = 10 * 1000;
+
+    /** 抓取搜索页使用的 UA，部分站点会拒绝空 UA 的请求 */
+    private static final String USER_AGENT =
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                    + "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
     @Resource
     private UserService userService;
@@ -119,7 +142,12 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         // 构造要入库的图片信息
         Picture picture = new Picture();
         picture.setUrl(uploadPictureResult.getUrl());
-        picture.setName(uploadPictureResult.getPicName());
+        // 允许调用方指定名称（批量抓取时用来生成「搜索词+序号」），未指定则用原始文件名
+        String picName = uploadPictureResult.getPicName();
+        if (pictureUploadRequest != null && StrUtil.isNotBlank(pictureUploadRequest.getPicName())) {
+            picName = pictureUploadRequest.getPicName();
+        }
+        picture.setName(picName);
         picture.setPicSize(uploadPictureResult.getPicSize());
         picture.setPicWidth(uploadPictureResult.getPicWidth());
         picture.setPicHeight(uploadPictureResult.getPicHeight());
@@ -138,9 +166,6 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR, "图片上传失败");
         return PictureVO.objToVo(picture);
     }
-
-
-
 
 
     /**
@@ -333,5 +358,164 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         }
     }
 
+    /**
+     * 批量抓取和创建图片
+     * <p>
+     * 从必应图片搜索页解析出图片直链，再逐个走 URL 上传流程入库。
+     * 单个图片失败不影响其余图片，只记录日志并继续。
+     *
+     * @param pictureUploadByBatchRequest 批量抓取请求
+     * @param loginUser                   当前登录的 user
+     * @return 成功创建的图片数
+     */
+    @Override
+    public Integer uploadPictureByBatch(PictureUploadByBatchRequest pictureUploadByBatchRequest, User loginUser) {
+        ThrowUtils.throwIf(loginUser == null, ErrorCode.NO_AUTH_ERROR);
+        String searchText = pictureUploadByBatchRequest.getSearchText();
+        ThrowUtils.throwIf(StrUtil.isBlank(searchText), ErrorCode.PARAMS_ERROR, "搜索词不能为空");
+
+        // 名称前缀：没传就用搜索词，保证抓下来的图片名字可读
+        // 注意判断方向 —— 写反会导致前缀被赋成空字符串，图片名全部退化成原始文件名
+        String namePrefix = pictureUploadByBatchRequest.getNamePrefix();
+        if (StrUtil.isBlank(namePrefix)) {
+            namePrefix = searchText;
+        }
+
+        // 校验抓取数量
+        Integer count = pictureUploadByBatchRequest.getCount();
+        ThrowUtils.throwIf(count == null || count <= 0, ErrorCode.PARAMS_ERROR, "抓取数量必须大于 0");
+        ThrowUtils.throwIf(count > MAX_BATCH_COUNT, ErrorCode.PARAMS_ERROR, "最多 " + MAX_BATCH_COUNT + " 条");
+
+        // 要抓取的地址（只取必应返回的结果片段，比整页 HTML 轻量）
+        String fetchUrl = String.format("https://cn.bing.com/images/async?q=%s&mmasync=1",
+                URLUtil.encode(searchText));
+        Document document = parseSearchPage(fetchUrl);
+
+        Element div = document.getElementsByClass("dgControl").first();
+        ThrowUtils.throwIf(ObjUtil.isNull(div), ErrorCode.OPERATION_ERROR, "获取元素失败");
+
+        Elements imgElementList = div.select("img.mimg");
+        ThrowUtils.throwIf(imgElementList.isEmpty(), ErrorCode.OPERATION_ERROR,
+                "没有解析到图片，可能是搜索词无结果或页面结构变了");
+
+        int uploadCount = 0;
+        // 搜索结果里常出现同一张图（同一原图被不同条目引用），去重避免入库一堆重复图片
+        Set<String> uploadedUrls = new HashSet<>();
+        for (Element imgElement : imgElementList) {
+            String fileUrl = resolveImageUrl(imgElement);
+            if (StrUtil.isBlank(fileUrl)) {
+                log.info("当前链接为空，已跳过");
+                continue;
+            }
+            if (!uploadedUrls.add(fileUrl)) {
+                log.info("图片地址重复，已跳过: {}", fileUrl);
+                continue;
+            }
+            // 上传图片
+            PictureUploadRequest pictureUploadRequest = new PictureUploadRequest();
+            pictureUploadRequest.setUploadType(FileUploadEnum.URL_TYPE);
+            pictureUploadRequest.setPictureUrl(fileUrl);
+            // 名称用「前缀 + 序号」，序号跟着成功数递增，失败时不会跳号
+            pictureUploadRequest.setPicName(namePrefix + (uploadCount + 1));
+            try {
+                PictureVO pictureVO = this.uploadPictureByUrl(pictureUploadRequest, loginUser);
+                log.info("图片上传成功, id = {}", pictureVO.getId());
+                uploadCount++;
+            } catch (Exception e) {
+                // 单张失败不影响整体
+                log.error("图片上传失败，地址 = {}", fileUrl, e);
+                continue;
+            }
+            if (uploadCount >= count) {
+                break;
+            }
+        }
+        return uploadCount;
+    }
+
+    /**
+     * 拉取并解析搜索页
+     * <p>
+     * 单独抽出来是为了把「网络请求」与「结果解析」解耦，方便测试替换。
+     *
+     * @param fetchUrl 搜索页地址
+     * @return 解析后的文档（其 baseUri 即 fetchUrl，可用于补全相对地址）
+     */
+    protected Document parseSearchPage(String fetchUrl) {
+        try {
+            return Jsoup.connect(fetchUrl)
+                    .userAgent(USER_AGENT)
+                    .timeout(FETCH_TIMEOUT_MILLIS)
+                    .get();
+        } catch (IOException e) {
+            log.error("获取页面失败，地址 = {}", fetchUrl, e);
+            throw new BusinessException(ErrorCode.OPERATION_ERROR, "获取页面失败");
+        }
+    }
+
+    /**
+     * 从搜索结果里解析出可下载的图片地址
+     * <p>
+     * 优先从结果条目的 m 属性（JSON）里取 murl —— 这是必应最稳定的原图直链位置；
+     * 其次取图片节点自身的 murl；再退回 data-src / src。
+     * 注意 src 只是站内缩略图（形如 /th?id=OIP.xxx），既没有图片后缀、画质也差，
+     * 只能作为最后的兜底。
+     *
+     * @param imgElement 图片节点（其所属文档带有 baseUri，可解析相对地址）
+     * @return 可下载的图片地址，解析不出时返回空串
+     */
+    private String resolveImageUrl(Element imgElement) {
+        String fileUrl = extractMurlFromMeta(imgElement);
+        if (StrUtil.isBlank(fileUrl)) {
+            fileUrl = imgElement.attr("murl");
+        }
+        if (StrUtil.isBlank(fileUrl)) {
+            fileUrl = imgElement.attr("data-src");
+        }
+        if (StrUtil.isBlank(fileUrl)) {
+            // absUrl 能把 // 开头的协议相对地址和 / 开头的站内地址补全
+            fileUrl = imgElement.absUrl("src");
+        }
+        if (StrUtil.isBlank(fileUrl)) {
+            return StrUtil.EMPTY;
+        }
+        // 协议相对地址补上 https
+        if (fileUrl.startsWith("//")) {
+            fileUrl = "https:" + fileUrl;
+        }
+        return fileUrl.trim();
+    }
+
+    /**
+     * 从结果条目的 m 属性里解析出原图地址
+     * <p>
+     * 该属性是一段 JSON 字符串，形如 {"murl":"https://...","turl":"https://..."}。
+     * 解析失败属于正常情况（不同版本的页面结构不一致），返回空串由调用方兜底。
+     *
+     * @param imgElement 图片节点
+     * @return 原图地址，取不到时返回空串
+     */
+    private String extractMurlFromMeta(Element imgElement) {
+        // m 属性挂在包裹图片的 a.iusc 上
+        Element link = imgElement.closest("a.iusc");
+        if (link == null) {
+            link = imgElement.parent();
+        }
+        if (link == null) {
+            return StrUtil.EMPTY;
+        }
+        String meta = link.attr("m");
+        if (StrUtil.isBlank(meta)) {
+            return StrUtil.EMPTY;
+        }
+        try {
+            JSONObject json = JSONUtil.parseObj(meta);
+            return StrUtil.nullToEmpty(json.getStr("murl"));
+        } catch (Exception e) {
+            // m 属性不是合法 JSON 时静默跳过，交给后续兜底
+            log.debug("解析 m 属性失败: {}", meta);
+            return StrUtil.EMPTY;
+        }
+    }
 
 }
