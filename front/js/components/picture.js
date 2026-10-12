@@ -4,7 +4,7 @@
 import { pictureApi } from '../api.js';
 import {
   $, $$, state, toast, showModal, closeModal, escapeHtml,
-  getFormValues, formatTime, formatSize, CATEGORY_OPTIONS,
+  getFormValues, formatTime, formatSize, CATEGORY_OPTIONS, debounce,
 } from '../ui.js';
 
 /** 允许上传的后端格式，须与 FileManager.validPicture 保持一致 */
@@ -146,13 +146,35 @@ export function openUploadModal({ pictureId, onSuccess } = {}) {
     title: isOverwrite ? '重新上传图片' : '上传图片',
     width: '640px',
     content: `
-      <div class="upload-box" id="drop-area">
-        <input type="file" id="file-input" accept="image/jpeg,image/png,image/webp"
-               ${isOverwrite ? '' : 'multiple'} hidden>
-        <button class="btn btn-primary" type="button" id="pick-btn">选择图片</button>
-        <p class="upload-tip">支持 jpg / jpeg / png / webp，单张不超过 2MB；过大的图片会在本地自动压缩${isOverwrite ? '' : '，可多选'}</p>
+      <div class="tabs" id="upload-tabs">
+        <button class="tab active" data-tab="file" type="button">本地文件</button>
+        <button class="tab" data-tab="url" type="button">图片链接</button>
       </div>
-      <div class="upload-list" id="file-list"></div>
+
+      <section data-pane="file">
+        <div class="upload-box" id="drop-area">
+          <input type="file" id="file-input" accept="image/jpeg,image/png,image/webp"
+                 ${isOverwrite ? '' : 'multiple'} hidden>
+          <button class="btn btn-primary" type="button" id="pick-btn">选择图片</button>
+          <p class="upload-tip">支持 jpg / jpeg / png / webp，单张不超过 2MB；过大的图片会在本地自动压缩${isOverwrite ? '' : '，可多选'}</p>
+        </div>
+        <div class="upload-list" id="file-list"></div>
+      </section>
+
+      <section data-pane="url" hidden>
+        <label class="field">
+          <span>图片地址</span>
+          <input id="url-input" type="url" placeholder="https://example.com/picture.jpg"
+                 autocomplete="off">
+        </label>
+        <div class="url-preview" id="url-preview" hidden>
+          <img id="url-preview-img" alt="预览">
+        </div>
+        <p class="upload-tip" id="url-hint">
+          后端会把这个地址的图片下载后存入图库，支持 http / https，单张不超过 2MB
+        </p>
+      </section>
+
       <div class="modal-foot">
         <button class="btn" type="button" data-modal-close>取消</button>
         <button class="btn btn-primary" id="start-upload" type="button" disabled>开始上传</button>
@@ -163,9 +185,41 @@ export function openUploadModal({ pictureId, onSuccess } = {}) {
   const listEl = $('#file-list', modal);
   const startBtn = $('#start-upload', modal);
   const dropArea = $('#drop-area', modal);
+  const urlInput = $('#url-input', modal);
+  const urlHint = $('#url-hint', modal);
+  const urlPreview = $('#url-preview', modal);
+  const urlPreviewImg = $('#url-preview-img', modal);
+  const panes = {};
+  $$('[data-pane]', modal).forEach((pane) => {
+    panes[pane.dataset.pane] = pane;
+  });
 
-  /** 待上传任务：{ file, preview, status, progress } */
+  /** 当前选中的上传方式：file / url */
+  let mode = 'file';
+
+  /** 待上传任务：{ file, preview, status, statusText } */
   let tasks = [];
+
+  /** 设置 URL 输入框下方的提示文案 */
+  function setUrlHint(text, isError = false) {
+    urlHint.textContent = text;
+    urlHint.classList.toggle('upload-tip-error', isError);
+  }
+
+  /** 切换上传方式 */
+  function switchMode(next) {
+    mode = next;
+    Object.keys(panes).forEach((key) => {
+      panes[key].hidden = key !== next;
+    });
+    $$('#upload-tabs .tab', modal).forEach((tab) => {
+      tab.classList.toggle('active', tab.dataset.tab === next);
+    });
+    // 图片链接方式不支持「覆盖已有图片」，这与后端只能按 id 覆盖本地文件的实现一致
+    startBtn.disabled = next === 'url'
+      ? (isOverwrite || !urlInput.value.trim())
+      : (tasks.length === 0 || tasks.some((task) => task.status === 'uploading'));
+  }
 
   /** 重绘待上传列表 */
   function renderList() {
@@ -236,6 +290,35 @@ export function openUploadModal({ pictureId, onSuccess } = {}) {
     renderList();
   }
 
+  /** 校验 URL 输入，顺便更新预览 */
+  function refreshUrlState() {
+    const value = urlInput.value.trim();
+    if (!value) {
+      urlPreview.hidden = true;
+      urlPreviewImg.removeAttribute('src');
+      setUrlHint('后端会把这个地址的图片下载后存入图库，支持 http / https，单张不超过 2MB');
+      startBtn.disabled = true;
+      return;
+    }
+    if (!/^https?:\/\//i.test(value)) {
+      urlPreview.hidden = true;
+      urlPreviewImg.removeAttribute('src');
+      setUrlHint('地址需要以 http:// 或 https:// 开头', true);
+      startBtn.disabled = true;
+      return;
+    }
+    urlPreviewImg.src = value;
+    urlPreview.hidden = false;
+    setUrlHint('将从这个地址下载图片并存入图库');
+    startBtn.disabled = isOverwrite;
+  }
+
+  /* ------------------------------ 事件绑定 ------------------------------ */
+
+  $$('#upload-tabs .tab', modal).forEach((tab) => {
+    tab.addEventListener('click', () => switchMode(tab.dataset.tab));
+  });
+
   $('#pick-btn', modal).addEventListener('click', () => input.click());
   input.addEventListener('change', () => {
     addFiles(input.files);
@@ -254,7 +337,38 @@ export function openUploadModal({ pictureId, onSuccess } = {}) {
     addFiles(e.dataTransfer.files);
   });
 
+  urlInput.addEventListener('input', debounce(refreshUrlState, 400));
+  urlPreviewImg.addEventListener('error', () => {
+    urlPreview.hidden = true;
+  });
+
   startBtn.addEventListener('click', async () => {
+    // 方式一：通过 URL 上传
+    if (mode === 'url') {
+      const pictureUrl = urlInput.value.trim();
+      if (!pictureUrl) {
+        toast('请输入图片地址', 'error');
+        return;
+      }
+      startBtn.disabled = true;
+      startBtn.textContent = '上传中…';
+      setUrlHint('正在下载并上传，请稍候…');
+      try {
+        await pictureApi.uploadByUrl(pictureUrl, pictureId);
+        toast('上传成功', 'success');
+        if (typeof onSuccess === 'function') {
+          onSuccess();
+        }
+        closeModal();
+      } catch (e) {
+        setUrlHint(e.message, true);
+        startBtn.disabled = false;
+        startBtn.textContent = '开始上传';
+      }
+      return;
+    }
+
+    // 方式二：本地文件
     const pending = tasks.filter((task) => task.status !== 'done');
     if (pending.length === 0) {
       return;
@@ -290,9 +404,17 @@ export function openUploadModal({ pictureId, onSuccess } = {}) {
     }
   });
 
+  // 覆盖已有图片时不能走 URL，直接提示并停在「本地文件」
+  if (isOverwrite) {
+    const urlTab = $('#upload-tabs .tab[data-tab="url"]', modal);
+    urlTab.addEventListener('click', () => {
+      toast('重新上传只支持本地文件，请选择图片文件', 'info');
+    });
+  }
+
   // 弹窗关闭时释放所有预览地址
   const observer = new MutationObserver(() => {
-    if (!$('#drop-area')) {
+    if (!$('#upload-tabs')) {
       tasks.forEach((task) => releaseUrl(task.preview));
       tasks = [];
       observer.disconnect();

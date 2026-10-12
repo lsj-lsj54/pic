@@ -11,6 +11,8 @@ import com.lsj.demo.common.PicturePermissionUtils;
 import com.lsj.demo.exception.BusinessException;
 import com.lsj.demo.exception.ErrorCode;
 import com.lsj.demo.exception.ThrowUtils;
+import com.lsj.demo.manager.factory.UploadFactory;
+import com.lsj.demo.manager.uplode.PictureUploadTemplate;
 import com.lsj.demo.model.dto.picture.PictureQueryRequest;
 import com.lsj.demo.model.dto.picture.PictureReviewRequest;
 import com.lsj.demo.model.dto.picture.PictureUploadRequest;
@@ -18,11 +20,11 @@ import com.lsj.demo.model.entity.User;
 import com.lsj.demo.mapper.PictureMapper;
 import com.lsj.demo.model.dto.file.UploadPictureResult;
 import com.lsj.demo.model.entity.Picture;
+import com.lsj.demo.model.enums.FileUploadEnum;
 import com.lsj.demo.model.enums.PictureReviewStatusEnum;
 import com.lsj.demo.model.vo.PictureVO;
 import com.lsj.demo.model.vo.UserVO;
 import com.lsj.demo.service.PictureService;
-import com.lsj.demo.manager.FileManager;
 import com.lsj.demo.service.UserService;
 import org.springframework.beans.BeanUtils;
 import org.springframework.stereotype.Service;
@@ -45,41 +47,75 @@ import java.util.stream.Collectors;
 public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         implements PictureService {
 
-    // 类内注入
-    @Resource
-    private FileManager fileManager;
-
     @Resource
     private UserService userService;
 
+
+    @Resource
+    private UploadFactory uploadFactory;
+
     /**
-     * 上传图片（可重新上传）
+     * 上传图片（本地文件）
      *
      * @param multipartFile        上传的图片文件
-     * @param pictureUploadRequest 图片上传请求，id 不为空时表示重新上传
-     * @param loginUser            登录的用户
-     * @return 图片封装类
+     * @param pictureUploadRequest 图片上传请求
+     * @param loginUser            当前登录的 user
+     * @return picture 的封装对象
      */
     @Override
-    public PictureVO uploadPicture(MultipartFile multipartFile, PictureUploadRequest pictureUploadRequest, User loginUser) {
+    public PictureVO uploadPicture(MultipartFile multipartFile, PictureUploadRequest pictureUploadRequest,
+                                   User loginUser) {
+        ThrowUtils.throwIf(multipartFile == null || multipartFile.isEmpty(),
+                ErrorCode.PARAMS_ERROR, "文件不能为空");
+        return doUpload(multipartFile, FileUploadEnum.FILE_TYPE, pictureUploadRequest, loginUser);
+    }
+
+    /**
+     * 上传图片（通过 URL）
+     *
+     * @param pictureUploadRequest 图片上传请求，必须携带 pictureUrl
+     * @param loginUser            当前登录的 user
+     * @return picture 的封装对象
+     */
+    @Override
+    public PictureVO uploadPictureByUrl(PictureUploadRequest pictureUploadRequest, User loginUser) {
+        ThrowUtils.throwIf(pictureUploadRequest == null
+                        || StrUtil.isBlank(pictureUploadRequest.getPictureUrl()),
+                ErrorCode.PARAMS_ERROR, "文件地址不能为空");
+        String pictureUrl = pictureUploadRequest.getPictureUrl().trim();
+        return doUpload(pictureUrl, FileUploadEnum.URL_TYPE, pictureUploadRequest, loginUser);
+    }
+
+    /**
+     * 上传图片的公共流程
+     * <p>
+     * 本地文件和 URL 两种方式共用：校验登录态 → 确定新增还是覆盖 → 校验操作权限 →
+     * 交给对应模板上传 → 组装入库对象（含审核参数）→ 保存。
+     *
+     * @param inputSource          输入源：MultipartFile 或图片 URL
+     * @param uploadType           上传方式，见 {@link FileUploadEnum}
+     * @param pictureUploadRequest 图片上传请求
+     * @param loginUser            当前登录的 user
+     * @return picture 的封装对象
+     */
+    private PictureVO doUpload(Object inputSource, String uploadType,
+                               PictureUploadRequest pictureUploadRequest, User loginUser) {
         ThrowUtils.throwIf(loginUser == null, ErrorCode.NO_AUTH_ERROR);
-        // 用于判断是新增还是更新图片
-        Long pictureId = null;
-        if (pictureUploadRequest != null) {
-            pictureId = pictureUploadRequest.getId();
-        }
-        // 如果是更新图片，需要校验图片是否存在，以及是否有操作权限
+
+        // 判断是新增还是覆盖已有图片
+        Long pictureId = pictureUploadRequest == null ? null : pictureUploadRequest.getId();
         if (pictureId != null) {
             Picture oldPicture = this.getById(pictureId);
             ThrowUtils.throwIf(oldPicture == null, ErrorCode.NOT_FOUND_ERROR, "图片不存在");
-            // 仅本人或管理员可编辑
+            // 仅本人或管理员可覆盖，避免越权改别人的图
             PicturePermissionUtils.checkPictureAuth(oldPicture, loginUser, userService);
         }
 
-        // 上传图片，得到信息
-        // 按照用户 id 划分目录
+        // 按上传方式取出对应实现，按用户 id 划分目录
         String uploadPathPrefix = String.format("public/%s", loginUser.getId());
-        UploadPictureResult uploadPictureResult = fileManager.uploadPicture(multipartFile, uploadPathPrefix);
+        PictureUploadTemplate uploadTemplate = uploadFactory.getUploadTemplate(uploadType);
+        UploadPictureResult uploadPictureResult = uploadTemplate.uploadPicture(inputSource, uploadPathPrefix);
+
         // 构造要入库的图片信息
         Picture picture = new Picture();
         picture.setUrl(uploadPictureResult.getUrl());
@@ -92,9 +128,9 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         picture.setUserId(loginUser.getId());
         // 补充审核参数
         fillReviewParams(picture, loginUser);
-        // 如果 pictureId 不为空，表示更新，否则是新增
+
+        // 如果是覆盖，需要补充 id 和编辑时间
         if (pictureId != null) {
-            // 如果是更新，需要补充 id 和编辑时间
             picture.setId(pictureId);
             picture.setEditTime(new Date());
         }
@@ -102,6 +138,10 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR, "图片上传失败");
         return PictureVO.objToVo(picture);
     }
+
+
+
+
 
     /**
      * 获取查询条件

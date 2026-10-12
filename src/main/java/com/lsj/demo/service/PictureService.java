@@ -21,7 +21,7 @@ import javax.servlet.http.HttpServletRequest;
 */
 public interface PictureService extends IService<Picture> {
     /**
-     * 上传图片
+     * 上传图片（本地文件）
      *
      * @param multipartFile        上传的图片文件
      * @param pictureUploadRequest 图片上传请求，id 不为空时表示重新上传
@@ -31,6 +31,18 @@ public interface PictureService extends IService<Picture> {
     PictureVO uploadPicture(MultipartFile multipartFile,
                             PictureUploadRequest pictureUploadRequest,
                             User loginUser);
+
+    /**
+     * 上传图片（通过 URL）
+     * <p>
+     * 会把远程图片下载后转存到对象存储，其余流程与本地文件上传一致。
+     *
+     * @param pictureUploadRequest 图片上传请求，必须携带 pictureUrl
+     * @param loginUser            登录的用户
+     * @return 图片封装类
+     */
+    PictureVO uploadPictureByUrl(PictureUploadRequest pictureUploadRequest,
+                                 User loginUser);
 
     /**
      * 获取查询的 queryWrapper

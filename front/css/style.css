@@ -755,6 +755,47 @@ h1, h2, h3 {
 
 /* ------------------------------ 上传 ------------------------------ */
 
+.tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.tab {
+  position: relative;
+  padding: 8px 14px;
+  border: none;
+  background: none;
+  font-size: 14px;
+  font-family: inherit;
+  color: var(--text-sub);
+  cursor: pointer;
+  border-radius: 8px 8px 0 0;
+  transition: color 0.15s, background 0.15s;
+}
+
+.tab:hover {
+  background: #f6f7f9;
+  color: var(--text);
+}
+
+.tab.active {
+  color: var(--primary);
+  font-weight: 500;
+}
+
+.tab.active::after {
+  content: '';
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: -1px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--primary);
+}
+
 .upload-box {
   display: flex;
   flex-direction: column;
@@ -776,6 +817,27 @@ h1, h2, h3 {
   margin: 0;
   font-size: 12px;
   color: var(--text-sub);
+}
+
+.upload-tip-error {
+  color: var(--danger);
+}
+
+.url-preview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 12px;
+  padding: 10px;
+  background: #f2f3f5;
+  border-radius: var(--radius);
+}
+
+.url-preview img {
+  max-height: 200px;
+  width: auto;
+  object-fit: contain;
+  border-radius: 6px;
 }
 
 .upload-list {

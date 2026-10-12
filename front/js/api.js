@@ -153,6 +153,19 @@ export const pictureApi = {
     }
     return request('/picture/upload', { method: 'POST', body: formData });
   },
+  /**
+   * 通过 URL 上传图片（后端会把远程图片下载后转存到对象存储）
+   *
+   * @param {string}      pictureUrl 图片地址
+   * @param {string}      [id]       图片 id，传了表示覆盖已有图片
+   */
+  uploadByUrl: (pictureUrl, id) => {
+    const body = { pictureUrl };
+    if (id !== undefined && id !== null && id !== '') {
+      body.id = String(id);
+    }
+    return request('/picture/upload/url', { method: 'POST', body });
+  },
   /** 删除图片（本人或管理员） */
   delete: (id) => request('/picture/delete', { method: 'POST', body: { id } }),
   /** 更新图片（仅管理员） */

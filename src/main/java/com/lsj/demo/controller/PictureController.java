@@ -1,5 +1,6 @@
 package com.lsj.demo.controller;
 
+import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.lsj.demo.annotation.AuthCheck;
@@ -18,6 +19,7 @@ import com.lsj.demo.model.dto.picture.PictureUpdateRequest;
 import com.lsj.demo.model.dto.picture.PictureUploadRequest;
 import com.lsj.demo.model.entity.Picture;
 import com.lsj.demo.model.entity.User;
+import com.lsj.demo.model.enums.FileUploadEnum;
 import com.lsj.demo.model.enums.PictureReviewStatusEnum;
 import com.lsj.demo.model.vo.PictureVO;
 import com.lsj.demo.service.PictureService;
@@ -53,20 +55,45 @@ public class PictureController {
     private UserService userService;
 
     /**
-     * 上传图片（可重新上传）
+     * 上传图片（本地文件，可重新上传）
      *
-     * @param multipartFile         上传的图片文件
-     * @param pictureUploadRequest  图片上传请求，id 不为空时表示重新上传
-     * @param request               request 请求
+     * @param multipartFile        上传的图片文件
+     * @param pictureUploadRequest 图片上传请求，id 不为空时表示重新上传
+     * @param request              request 请求
      * @return 图片封装类
      */
     @PostMapping("/upload")
-    public BaseResponse<PictureVO> uploadPicture(@RequestPart("file") MultipartFile multipartFile,
+    public BaseResponse<PictureVO> uploadPicture(@RequestPart(value = "file", required = false) MultipartFile multipartFile,
                                                  PictureUploadRequest pictureUploadRequest,
                                                  HttpServletRequest request) {
-        ThrowUtils.throwIf(multipartFile == null, ErrorCode.PARAMS_ERROR, "文件不能为空");
+        ThrowUtils.throwIf(multipartFile == null || multipartFile.isEmpty(),
+                ErrorCode.PARAMS_ERROR, "文件不能为空");
         User loginUser = userService.getLoginUser(request);
         PictureVO pictureVO = pictureService.uploadPicture(multipartFile, pictureUploadRequest, loginUser);
+        return ResultUtils.success(pictureVO);
+    }
+
+    /**
+     * 上传图片（通过 URL，可重新上传）
+     * <p>
+     * 会把远程图片下载后转存到对象存储，走与本地文件相同的模板流程。
+     *
+     * @param pictureUploadRequest 图片上传请求，必须携带 pictureUrl
+     * @param request              request 请求
+     * @return 图片封装类
+     */
+    @PostMapping("/upload/url")
+    public BaseResponse<PictureVO> uploadPictureByUrl(@RequestBody PictureUploadRequest pictureUploadRequest,
+                                                      HttpServletRequest request) {
+        ThrowUtils.throwIf(pictureUploadRequest == null
+                        || StrUtil.isBlank(pictureUploadRequest.getPictureUrl()),
+                ErrorCode.PARAMS_ERROR, "文件地址不能为空");
+        // 显式声明了上传方式时做一次一致性校验，避免参数与实际内容对不上
+        ThrowUtils.throwIf(FileUploadEnum.getEnumByTypeOrNull(pictureUploadRequest.getUploadType())
+                        == FileUploadEnum.FILE,
+                ErrorCode.PARAMS_ERROR, "当前是 URL 上传接口，请改用文件上传接口");
+        User loginUser = userService.getLoginUser(request);
+        PictureVO pictureVO = pictureService.uploadPictureByUrl(pictureUploadRequest, loginUser);
         return ResultUtils.success(pictureVO);
     }
 

@@ -6,7 +6,6 @@ import com.lsj.demo.common.ResultUtils;
 import com.lsj.demo.exception.BusinessException;
 import com.lsj.demo.exception.ErrorCode;
 import com.lsj.demo.manager.CosManager;
-import com.lsj.demo.manager.FileManager;
 import com.lsj.demo.model.constant.UserConstant;
 import com.qcloud.cos.model.COSObject;
 import com.qcloud.cos.model.COSObjectInputStream;
@@ -39,9 +38,6 @@ public class FileController {
     @Resource
     private CosManager cosManager;
 
-    @Resource
-    private FileManager fileManager;
-
     /**
      * 测试文件上传
      *
@@ -66,8 +62,10 @@ public class FileController {
             log.error("file upload error, filepath = {}", filepath, e);
             throw new BusinessException(ErrorCode.SYSTEM_ERROR, "上传失败");
         } finally {
-            // 删除临时文件（公共方法，避免每个上传方法都重复写一遍）
-            fileManager.deleteTempFile(file);
+            // 删除临时文件
+            if (file != null && !file.delete()) {
+                log.error("file delete error, filepath = {}", filepath);
+            }
         }
     }
 
