@@ -3,7 +3,7 @@ package com.lsj.demo.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.service.IService;
-import com.lsj.demo.model.dto.UserQueryRequest;
+import com.lsj.demo.model.dto.user.UserQueryRequest;
 import com.lsj.demo.model.entity.User;
 import com.lsj.demo.model.vo.LoginUserVO;
 import com.lsj.demo.model.vo.UserVO;
@@ -90,4 +90,14 @@ public interface UserService extends IService<User> {
      * @return 加密后的密码
      */
     String getEncryptPassword(String defaultPassword);
+
+    /**
+     * 是否为管理员
+     *
+     * @param user 当前登录的 user
+     * @return  是否是管理员 true 表示 是 、false 表示 否
+     */
+    boolean isAdmin(User user);
+
+
 }

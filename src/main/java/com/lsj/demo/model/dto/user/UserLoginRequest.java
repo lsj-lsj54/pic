@@ -1,4 +1,4 @@
-package com.lsj.demo.model.dto;
+package com.lsj.demo.model.dto.user;
 
 import lombok.Data;
 

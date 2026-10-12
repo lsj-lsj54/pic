@@ -5,7 +5,7 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.lsj.demo.exception.BusinessException;
 import com.lsj.demo.exception.ErrorCode;
-import com.lsj.demo.model.dto.UserQueryRequest;
+import com.lsj.demo.model.dto.user.UserQueryRequest;
 import com.lsj.demo.model.entity.User;
 import com.lsj.demo.model.enums.UserRoleEnum;
 import com.lsj.demo.model.vo.LoginUserVO;
@@ -17,7 +17,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.CollectionUtils;
 import org.springframework.util.DigestUtils;
 import com.lsj.demo.model.vo.UserVO;
-import org.springframework.util.StringUtils;
 
 
 import javax.servlet.http.HttpServletRequest;
@@ -188,6 +187,11 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
         queryWrapper.like(StrUtil.isNotBlank(userProfile), "userProfile", userProfile);
         queryWrapper.orderBy(StrUtil.isNotBlank(sortOrder), sortOrder.equals("ascend"), sortField);
         return queryWrapper;
+    }
+
+    @Override
+    public boolean isAdmin(User user) {
+        return user != null && UserRoleEnum.ADMIN.getValue().equals(user.getUserRole());
     }
 
 

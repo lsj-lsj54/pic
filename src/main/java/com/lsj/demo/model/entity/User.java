@@ -2,6 +2,7 @@ package com.lsj.demo.model.entity;
 
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableLogic;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 
@@ -68,6 +69,7 @@ public class User {
     /**
      * 是否删除
      */
+    @TableLogic
     private Integer isDelete;
 
     @Override

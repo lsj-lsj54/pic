@@ -2,7 +2,13 @@ server:
   port: 8666
   servlet:
     context-path: /api
+    # 开放更大的文件上传体积
+    multipart:
+      max-file-size: 10MB
+
 spring:
+  profiles:
+    active: local
   application:
     name: yu-picture-backend
   datasource:
