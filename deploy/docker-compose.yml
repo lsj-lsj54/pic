@@ -1,0 +1,105 @@
+# 云图库一键部署：MySQL + 后端 + 前端(Nginx)
+#
+# 使用方式见 deploy/README.md：
+#   1. cp deploy/.env.example deploy/.env 并填写密码与腾讯云密钥
+#   2. docker compose --env-file deploy/.env up -d --build
+#
+# 说明：Compose 会按顺序启动，app 依赖 mysql 健康检查通过。
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: picture-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: picture
+      TZ: Asia/Shanghai
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      # 小内存机器上别让 MySQL 抢太多内存
+      - --innodb-buffer-pool-size=256M
+      - --max-connections=100
+    volumes:
+      - mysql-data:/var/lib/mysql
+      # 仅在数据卷为空（首次启动）时执行，脚本写成可重复执行更保险
+      - ./mysql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+    networks: [app-net]
+
+  redis:
+    image: redis:7-alpine
+    container_name: picture-redis
+    restart: unless-stopped
+    # 只在内网暴露，不映射到宿主机，避免被扫到
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD}"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [app-net]
+
+  app:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: picture-app:latest
+    container_name: picture-app
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      TZ: Asia/Shanghai
+      # 用环境变量覆盖 application.yml，不用把密码写进代码
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/picture?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false
+      SPRING_DATASOURCE_USERNAME: root
+      SPRING_DATASOURCE_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      # Redis（后续接入缓存时直接可用）
+      SPRING_REDIS_HOST: redis
+      SPRING_REDIS_PORT: 6379
+      SPRING_REDIS_PASSWORD: ${REDIS_PASSWORD}
+      # 腾讯云 COS：密钥必须从环境变量注入，不要提交到仓库
+      COS_CLIENT_HOST: ${COS_HOST}
+      COS_CLIENT_SECRET_ID: ${COS_SECRET_ID}
+      COS_CLIENT_SECRET_KEY: ${COS_SECRET_KEY}
+      COS_CLIENT_REGION: ${COS_REGION}
+      COS_CLIENT_BUCKET: ${COS_BUCKET}
+      JAVA_OPTS: "-XX:MaxRAMPercentage=70 -XX:+UseG1GC -Dfile.encoding=UTF-8"
+    networks: [app-net]
+    # 不映射端口到宿主机：只允许经 Nginx 访问，减少暴露面。
+    # 需要直接从外面调接口时再打开下面注释：
+    # ports:
+    #   - "8666:8666"
+
+  front:
+    build:
+      context: ..
+      dockerfile: Dockerfile.front
+    image: picture-front:latest
+    container_name: picture-front
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      - "80:80"
+    networks: [app-net]
+
+volumes:
+  mysql-data:
+  redis-data:
+
+networks:
+  app-net:
+    driver: bridge

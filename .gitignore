@@ -7,6 +7,9 @@ target/
 
 ###Custom###
 application-local.yml
+# 部署用的环境变量文件（含密码、密钥），只提交 .env.example
+.env
+deploy/.env
 
 
 ### STS ###
