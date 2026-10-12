@@ -11,10 +11,7 @@ import com.lsj.demo.exception.ErrorCode;
 import com.lsj.demo.exception.ThrowUtils;
 import com.lsj.demo.manager.CosManager;
 import com.lsj.demo.model.constant.UserConstant;
-import com.lsj.demo.model.dto.picture.PictureEditRequest;
-import com.lsj.demo.model.dto.picture.PictureQueryRequest;
-import com.lsj.demo.model.dto.picture.PictureUpdateRequest;
-import com.lsj.demo.model.dto.picture.PictureUploadRequest;
+import com.lsj.demo.model.dto.picture.*;
 import com.lsj.demo.model.entity.Picture;
 import com.lsj.demo.model.entity.User;
 import com.lsj.demo.model.vo.PictureVO;
@@ -116,7 +113,7 @@ public class FileController {
      * 上传图片（可重新上传）
      */
     @PostMapping("/upload")
-    @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
+    //@AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
     public BaseResponse<PictureVO> uploadPicture(
             @RequestPart("file") MultipartFile multipartFile,
             PictureUploadRequest pictureUploadRequest,
@@ -264,6 +261,20 @@ public class FileController {
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
         return ResultUtils.success(true);
     }
+
+
+
+    @PostMapping("/review")
+    @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
+    public BaseResponse<Boolean> doPictureReview(@RequestBody PictureReviewRequest pictureReviewRequest,
+                                                 HttpServletRequest request) {
+        ThrowUtils.throwIf(pictureReviewRequest == null, ErrorCode.PARAMS_ERROR);
+        User loginUser = userService.getLoginUser(request);
+        pictureService.doPictureReview(pictureReviewRequest, loginUser);
+        return ResultUtils.success(true);
+    }
+
+
 
 }
 

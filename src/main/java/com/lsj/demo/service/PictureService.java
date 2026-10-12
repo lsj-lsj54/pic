@@ -3,6 +3,7 @@ package com.lsj.demo.service;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.lsj.demo.model.dto.picture.PictureQueryRequest;
+import com.lsj.demo.model.dto.picture.PictureReviewRequest;
 import com.lsj.demo.model.dto.picture.PictureUploadRequest;
 import com.lsj.demo.model.entity.Picture;
 import com.lsj.demo.model.entity.User;
@@ -58,5 +59,20 @@ public interface PictureService extends IService<Picture> {
      * @param picture 需要校验的 picture 对象
      */
     void validPicture(Picture picture);
+    /**
+     * 图片审核
+     *
+     * @param pictureReviewRequest 图片审核请求
+     * @param loginUser            当前登录的 user
+     */
+    void doPictureReview(PictureReviewRequest pictureReviewRequest, User loginUser);
+
+    /**
+     * 填充审核参数，方便其他方法使用
+     *
+     * @param picture   picture
+     * @param loginUser 登录的用户
+     */
+    void fillReviewParams(Picture picture, User loginUser);
 
 }
