@@ -95,7 +95,10 @@ public class PictureVO implements Serializable {
     private static final long serialVersionUID = 1L;  
   
     /**  
-     * 封装类转对象  
+     * 封装类转对象
+     *
+     * @param pictureVO 图片封装类
+     * @return 图片实体类
      */  
     public static Picture voToObj(PictureVO pictureVO) {
         if (pictureVO == null) {  
@@ -109,7 +112,10 @@ public class PictureVO implements Serializable {
     }  
   
     /**  
-     * 对象转封装类  
+     * 对象转封装类
+     *
+     * @param picture 图片实体类
+     * @return 图片封装类
      */  
     public static PictureVO objToVo(Picture picture) {  
         if (picture == null) {  

@@ -37,6 +37,15 @@ import static com.lsj.demo.model.constant.UserConstant.USER_LOGIN_STATE;
 @Slf4j
 public class UserServiceImpl extends ServiceImpl<UserMapper, User>
         implements UserService {
+
+    /**
+     * 用户注册
+     *
+     * @param userAccount   用户账户
+     * @param userPassword  用户密码
+     * @param checkPassword 校验密码
+     * @return 新用户 id
+     */
     @Override
     public long userRegister(String userAccount, String userPassword, String checkPassword) {
         // 1. 校验
@@ -74,6 +83,13 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
         return user.getId();
     }
 
+    /**
+     * 给密码加盐并加密
+     *
+     * @param userPassword 加密前的明文密码
+     * @return 加密后的密码
+     */
+    @Override
     public String getEncryptPassword(String userPassword) {
         // 盐值，混淆密码
         final String SALT = "yupi";
@@ -81,6 +97,14 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
     }
 
 
+    /**
+     * 用户登录
+     *
+     * @param userAccount  用户账户
+     * @param userPassword 用户密码
+     * @param request      request 请求
+     * @return 脱敏后的用户信息
+     */
     @Override
     public LoginUserVO userLogin(String userAccount, String userPassword, HttpServletRequest request) {
         // 1. 校验
@@ -110,6 +134,12 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
         return this.getLoginUserVO(user);
     }
 
+    /**
+     * 获取脱敏的已登录用户信息
+     *
+     * @param user 脱敏前的用户信息
+     * @return 脱敏的已登录用户信息
+     */
     @Override
     public LoginUserVO getLoginUserVO(User user) {
         if (user == null) {
@@ -120,6 +150,12 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
         return loginUserVO;
     }
 
+    /**
+     * 获取当前登录用户
+     *
+     * @param request request 请求
+     * @return 当前登录用户
+     */
     @Override
     public User getLoginUser(HttpServletRequest request) {
         // 先判断是否已登录
@@ -137,6 +173,12 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
         return currentUser;
     }
 
+    /**
+     * 用户注销
+     *
+     * @param request request 请求
+     * @return 注销结果
+     */
     @Override
     public boolean userLogout(HttpServletRequest request) {
         // 先判断是否已登录
@@ -149,6 +191,12 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
         return true;
     }
 
+    /**
+     * 获取用户脱敏信息
+     *
+     * @param user 脱敏前的信息
+     * @return 脱敏后的信息
+     */
     @Override
     public UserVO getUserVO(User user) {
         if (user == null) {
@@ -159,6 +207,12 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
         return userVO;
     }
 
+    /**
+     * 批量获取用户脱敏信息
+     *
+     * @param userList 脱敏前的信息
+     * @return 脱敏后的 List 列表
+     */
     @Override
     public List<UserVO> getUserVOList(List<User> userList) {
         if (CollectionUtils.isEmpty(userList)) {
@@ -167,6 +221,12 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
         return userList.stream().map(this::getUserVO).collect(Collectors.toList());
     }
 
+    /**
+     * 获取查询条件
+     *
+     * @param userQueryRequest 查询条件
+     * @return 可用来查询的 queryWrapper
+     */
     @Override
     public QueryWrapper<User> getQueryWrapper(UserQueryRequest userQueryRequest) {
         if (userQueryRequest == null) {
@@ -189,13 +249,16 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
         return queryWrapper;
     }
 
+    /**
+     * 是否为管理员
+     *
+     * @param user 当前登录的 user
+     * @return 是否是管理员 true 表示 是 、false 表示 否
+     */
     @Override
     public boolean isAdmin(User user) {
         return user != null && UserRoleEnum.ADMIN.getValue().equals(user.getUserRole());
     }
-
-
-
 }
 
 

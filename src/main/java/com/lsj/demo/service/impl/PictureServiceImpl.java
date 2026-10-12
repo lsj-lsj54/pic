@@ -4,19 +4,16 @@ package com.lsj.demo.service.impl;
 import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.util.ObjUtil;
 import cn.hutool.core.util.StrUtil;
-import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
-import com.lsj.demo.annotation.AuthCheck;
-import com.lsj.demo.common.BaseResponse;
-import com.lsj.demo.common.DeleteRequest;
-import com.lsj.demo.common.ResultUtils;
+import com.lsj.demo.common.PicturePermissionUtils;
 import com.lsj.demo.exception.BusinessException;
 import com.lsj.demo.exception.ErrorCode;
 import com.lsj.demo.exception.ThrowUtils;
-import com.lsj.demo.model.constant.UserConstant;
-import com.lsj.demo.model.dto.picture.*;
+import com.lsj.demo.model.dto.picture.PictureQueryRequest;
+import com.lsj.demo.model.dto.picture.PictureReviewRequest;
+import com.lsj.demo.model.dto.picture.PictureUploadRequest;
 import com.lsj.demo.model.entity.User;
 import com.lsj.demo.mapper.PictureMapper;
 import com.lsj.demo.model.dto.file.UploadPictureResult;
@@ -29,9 +26,6 @@ import com.lsj.demo.manager.FileManager;
 import com.lsj.demo.service.UserService;
 import org.springframework.beans.BeanUtils;
 import org.springframework.stereotype.Service;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.multipart.MultipartFile;
 
 import javax.annotation.Resource;
@@ -55,11 +49,17 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
     @Resource
     private FileManager fileManager;
 
-
     @Resource
     private UserService userService;
 
-
+    /**
+     * 上传图片（可重新上传）
+     *
+     * @param multipartFile        上传的图片文件
+     * @param pictureUploadRequest 图片上传请求，id 不为空时表示重新上传
+     * @param loginUser            登录的用户
+     * @return 图片封装类
+     */
     @Override
     public PictureVO uploadPicture(MultipartFile multipartFile, PictureUploadRequest pictureUploadRequest, User loginUser) {
         ThrowUtils.throwIf(loginUser == null, ErrorCode.NO_AUTH_ERROR);
@@ -68,14 +68,12 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         if (pictureUploadRequest != null) {
             pictureId = pictureUploadRequest.getId();
         }
-        // 如果是更新图片，需要校验图片是否存在
+        // 如果是更新图片，需要校验图片是否存在，以及是否有操作权限
         if (pictureId != null) {
             Picture oldPicture = this.getById(pictureId);
             ThrowUtils.throwIf(oldPicture == null, ErrorCode.NOT_FOUND_ERROR, "图片不存在");
             // 仅本人或管理员可编辑
-            if (!oldPicture.getUserId().equals(loginUser.getId()) && !userService.isAdmin(loginUser)) {
-                throw new BusinessException(ErrorCode.NO_AUTH_ERROR);
-            }
+            PicturePermissionUtils.checkPictureAuth(oldPicture, loginUser, userService);
         }
 
         // 上传图片，得到信息
@@ -105,6 +103,12 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         return PictureVO.objToVo(picture);
     }
 
+    /**
+     * 获取查询条件
+     *
+     * @param pictureQueryRequest 图片查询请求
+     * @return 可用来查询的 queryWrapper
+     */
     @Override
     public QueryWrapper<Picture> getQueryWrapper(PictureQueryRequest pictureQueryRequest) {
         QueryWrapper<Picture> queryWrapper = new QueryWrapper<>();
@@ -159,11 +163,17 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
             }
         }
         // 排序
-        queryWrapper.orderBy(StrUtil.isNotEmpty(sortField), sortOrder.equals("ascend"), sortField);
+        queryWrapper.orderBy(StrUtil.isNotEmpty(sortField), "ascend".equals(sortOrder), sortField);
         return queryWrapper;
     }
 
-
+    /**
+     * 获取单个图片的 VO 对象
+     *
+     * @param picture picture 图片
+     * @param request request 请求
+     * @return 对应图片的 VO
+     */
     @Override
     public PictureVO getPictureVO(Picture picture, HttpServletRequest request) {
         // 对象转封装类
@@ -180,6 +190,10 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
 
     /**
      * 分页获取图片封装
+     *
+     * @param picturePage picture 分页对象
+     * @param request     request 请求
+     * @return 分页的 VO
      */
     @Override
     public Page<PictureVO> getPictureVOPage(Page<Picture> picturePage, HttpServletRequest request) {
@@ -207,6 +221,11 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         return pictureVOPage;
     }
 
+    /**
+     * 校验参数
+     *
+     * @param picture 需要校验的 picture 对象
+     */
     @Override
     public void validPicture(Picture picture) {
         ThrowUtils.throwIf(picture == null, ErrorCode.PARAMS_ERROR);
@@ -225,154 +244,11 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
     }
 
     /**
-     * 删除图片
+     * 图片审核
+     *
+     * @param pictureReviewRequest 图片审核请求
+     * @param loginUser            当前登录的 user
      */
-    @PostMapping("/delete")
-    public BaseResponse<Boolean> deletePicture(@RequestBody DeleteRequest deleteRequest, HttpServletRequest request) {
-        if (deleteRequest == null || deleteRequest.getId() <= 0) {
-            throw new BusinessException(ErrorCode.PARAMS_ERROR);
-        }
-        User loginUser = userService.getLoginUser(request);
-        long id = deleteRequest.getId();
-        // 判断是否存在
-        Picture oldPicture = this.getById(id);
-        ThrowUtils.throwIf(oldPicture == null, ErrorCode.NOT_FOUND_ERROR);
-        // 仅本人或管理员可删除
-        if (!oldPicture.getUserId().equals(loginUser.getId()) && !userService.isAdmin(loginUser)) {
-            throw new BusinessException(ErrorCode.NO_AUTH_ERROR);
-        }
-        // 操作数据库
-        boolean result = this.removeById(id);
-        ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
-        return ResultUtils.success(true);
-    }
-
-    /**
-     * 更新图片（仅管理员可用）
-     */
-    @PostMapping("/update")
-    @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
-    public BaseResponse<Boolean> updatePicture(@RequestBody PictureUpdateRequest pictureUpdateRequest, HttpServletRequest request) {
-        if (pictureUpdateRequest == null || pictureUpdateRequest.getId() <= 0) {
-            throw new BusinessException(ErrorCode.PARAMS_ERROR);
-        }
-        // 将实体类和 DTO 进行转换
-        Picture picture = new Picture();
-        BeanUtils.copyProperties(pictureUpdateRequest, picture);
-        // 注意将 list 转为 string
-        picture.setTags(JSONUtil.toJsonStr(pictureUpdateRequest.getTags()));
-        // 数据校验
-        this.validPicture(picture);
-        // 判断是否存在
-        long id = pictureUpdateRequest.getId();
-        Picture oldPicture = this.getById(id);
-        ThrowUtils.throwIf(oldPicture == null, ErrorCode.NOT_FOUND_ERROR);
-        // 补充审核参数
-        User loginUser = userService.getLoginUser(request);
-        this.fillReviewParams(picture, loginUser);
-        // 操作数据库
-        boolean result = this.updateById(picture);
-        ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
-        return ResultUtils.success(true);
-
-
-    }
-
-    /**
-     * 根据 id 获取图片（仅管理员可用）
-     */
-    @GetMapping("/get")
-    @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
-    public BaseResponse<Picture> getPictureById(long id, HttpServletRequest request) {
-        ThrowUtils.throwIf(id <= 0, ErrorCode.PARAMS_ERROR);
-        // 查询数据库
-        Picture picture = this.getById(id);
-        ThrowUtils.throwIf(picture == null, ErrorCode.NOT_FOUND_ERROR);
-        // 获取封装类
-        return ResultUtils.success(picture);
-    }
-
-    /**
-     * 根据 id 获取图片（封装类）
-     */
-    @GetMapping("/get/vo")
-    public BaseResponse<PictureVO> getPictureVOById(long id, HttpServletRequest request) {
-        ThrowUtils.throwIf(id <= 0, ErrorCode.PARAMS_ERROR);
-        // 查询数据库
-        Picture picture = this.getById(id);
-        ThrowUtils.throwIf(picture == null, ErrorCode.NOT_FOUND_ERROR);
-        // 获取封装类
-        return ResultUtils.success(this.getPictureVO(picture, request));
-    }
-
-    /**
-     * 分页获取图片列表（仅管理员可用）
-     */
-    @PostMapping("/list/page")
-    @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
-    public BaseResponse<Page<Picture>> listPictureByPage(@RequestBody PictureQueryRequest pictureQueryRequest) {
-        long current = pictureQueryRequest.getCurrent();
-        long size = pictureQueryRequest.getPageSize();
-        // 查询数据库
-        Page<Picture> picturePage = this.page(new Page<>(current, size),
-                this.getQueryWrapper(pictureQueryRequest));
-        return ResultUtils.success(picturePage);
-    }
-
-    /**
-     * 分页获取图片列表（封装类）
-     */
-    @PostMapping("/list/page/vo")
-    public BaseResponse<Page<PictureVO>> listPictureVOByPage(@RequestBody PictureQueryRequest pictureQueryRequest,
-                                                             HttpServletRequest request) {
-        long current = pictureQueryRequest.getCurrent();
-        long size = pictureQueryRequest.getPageSize();
-        // 限制爬虫
-        ThrowUtils.throwIf(size > 20, ErrorCode.PARAMS_ERROR);
-        // 普通用户默认只能查看已过审的数据
-        pictureQueryRequest.setReviewStatus(PictureReviewStatusEnum.PASS.getValue());
-        // 查询数据库
-        Page<Picture> picturePage = this.page(new Page<>(current, size),
-                this.getQueryWrapper(pictureQueryRequest));
-        // 获取封装类
-        return ResultUtils.success(this.getPictureVOPage(picturePage, request));
-    }
-
-    /**
-     * 编辑图片（给用户使用）
-     */
-    @PostMapping("/edit")
-    public BaseResponse<Boolean> editPicture(@RequestBody PictureEditRequest pictureEditRequest, HttpServletRequest request) {
-        if (pictureEditRequest == null || pictureEditRequest.getId() <= 0) {
-            throw new BusinessException(ErrorCode.PARAMS_ERROR);
-        }
-        // 在此处将实体类和 DTO 进行转换
-        Picture picture = new Picture();
-        BeanUtils.copyProperties(pictureEditRequest, picture);
-        // 注意将 list 转为 string
-        picture.setTags(JSONUtil.toJsonStr(pictureEditRequest.getTags()));
-        // 设置编辑时间
-        picture.setEditTime(new Date());
-        // 数据校验
-        this.validPicture(picture);
-        User loginUser = userService.getLoginUser(request);
-        // 判断是否存在
-        long id = pictureEditRequest.getId();
-        Picture oldPicture = this.getById(id);
-        ThrowUtils.throwIf(oldPicture == null, ErrorCode.NOT_FOUND_ERROR);
-        // 仅本人或管理员可编辑
-        if (!oldPicture.getUserId().equals(loginUser.getId()) && !userService.isAdmin(loginUser)) {
-            throw new BusinessException(ErrorCode.NO_AUTH_ERROR);
-        }
-        // 补充审核参数
-        this.fillReviewParams(picture, loginUser);
-        // 操作数据库
-        boolean result = this.updateById(picture);
-        ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
-        return ResultUtils.success(true);
-    }
-
-
     @Override
     public void doPictureReview(PictureReviewRequest pictureReviewRequest, User loginUser) {
         Long id = pictureReviewRequest.getId();
@@ -397,6 +273,12 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
     }
 
+    /**
+     * 填充审核参数，方便其他方法使用
+     *
+     * @param picture   picture
+     * @param loginUser 登录的用户
+     */
     @Override
     public void fillReviewParams(Picture picture, User loginUser) {
         if (userService.isAdmin(loginUser)) {
@@ -413,7 +295,3 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
 
 
 }
-
-
-
-

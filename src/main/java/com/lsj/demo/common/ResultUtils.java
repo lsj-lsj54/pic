@@ -40,6 +40,7 @@ public class ResultUtils {
      * 失败
      *
      * @param errorCode 错误码
+     * @param message   错误信息
      * @return 响应
      */
     public static BaseResponse<?> error(ErrorCode errorCode, String message) {

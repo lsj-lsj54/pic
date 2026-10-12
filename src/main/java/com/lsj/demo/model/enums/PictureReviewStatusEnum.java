@@ -33,7 +33,10 @@ public enum PictureReviewStatusEnum {
     }  
   
     /**  
-     * 根据 value 获取枚举  
+     * 根据 value 获取枚举
+     *
+     * @param value 审核状态的取值
+     * @return 枚举值，取不到时抛出参数异常
      */  
     public static PictureReviewStatusEnum getEnumByValue(Integer value) {
         PictureReviewStatusEnum pictureReviewStatusEnum = value == null ? null : PICTURE_REVIEW_STATUS_ENUM_MAP.getOrDefault(value, null);

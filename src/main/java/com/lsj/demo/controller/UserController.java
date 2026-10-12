@@ -9,6 +9,7 @@ import com.lsj.demo.exception.BusinessException;
 import com.lsj.demo.exception.ErrorCode;
 import com.lsj.demo.exception.ThrowUtils;
 import com.lsj.demo.model.constant.UserConstant;
+import com.lsj.demo.model.dto.user.UserAddRequest;
 import com.lsj.demo.model.dto.user.UserLoginRequest;
 import com.lsj.demo.model.dto.user.UserQueryRequest;
 import com.lsj.demo.model.dto.user.UserRegisterRequest;
@@ -18,12 +19,21 @@ import com.lsj.demo.model.vo.LoginUserVO;
 import com.lsj.demo.model.vo.UserVO;
 import com.lsj.demo.service.UserService;
 import org.springframework.beans.BeanUtils;
-import org.springframework.web.bind.annotation.*;
-import com.lsj.demo.model.dto.user.UserAddRequest;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
 import javax.annotation.Resource;
 import javax.servlet.http.HttpServletRequest;
 import java.util.List;
 
+/**
+ * 用户模块接口
+ *
+ * @author lsj
+ */
 @RestController
 @RequestMapping("/user")
 public class UserController {
@@ -34,8 +44,8 @@ public class UserController {
     /**
      * 用户注册
      *
-     * @param userRegisterRequest
-     * @return
+     * @param userRegisterRequest 用户注册请求
+     * @return 新用户 id
      */
     @PostMapping("/register")
     public BaseResponse<Long> userRegister(@RequestBody UserRegisterRequest userRegisterRequest) {
@@ -47,6 +57,13 @@ public class UserController {
         return ResultUtils.success(result);
     }
 
+    /**
+     * 用户登录
+     *
+     * @param userLoginRequest 用户登录请求
+     * @param request          request 请求
+     * @return 脱敏后的登录用户信息
+     */
     @PostMapping("/login")
     public BaseResponse<LoginUserVO> userLogin(@RequestBody UserLoginRequest userLoginRequest, HttpServletRequest request) {
         ThrowUtils.throwIf(userLoginRequest == null, ErrorCode.PARAMS_ERROR);
@@ -56,12 +73,24 @@ public class UserController {
         return ResultUtils.success(loginUserVO);
     }
 
+    /**
+     * 获取当前登录用户
+     *
+     * @param request request 请求
+     * @return 脱敏后的登录用户信息
+     */
     @GetMapping("/get/login")
     public BaseResponse<LoginUserVO> getLoginUser(HttpServletRequest request) {
         User user = userService.getLoginUser(request);
         return ResultUtils.success(userService.getLoginUserVO(user));
     }
 
+    /**
+     * 用户注销
+     *
+     * @param request request 请求
+     * @return 注销结果
+     */
     @PostMapping("/logout")
     public BaseResponse<Boolean> userLogout(HttpServletRequest request) {
         ThrowUtils.throwIf(request == null, ErrorCode.PARAMS_ERROR);
@@ -70,7 +99,10 @@ public class UserController {
     }
 
     /**
-     * 创建用户
+     * 创建用户（仅管理员可用）
+     *
+     * @param userAddRequest 用户创建请求
+     * @return 新用户 id
      */
     @PostMapping("/add")
     @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
@@ -78,9 +110,8 @@ public class UserController {
         ThrowUtils.throwIf(userAddRequest == null, ErrorCode.PARAMS_ERROR);
         User user = new User();
         BeanUtils.copyProperties(userAddRequest, user);
-        // 默认密码 12345678
-        final String DEFAULT_PASSWORD = "12345678";
-        String encryptPassword = userService.getEncryptPassword(DEFAULT_PASSWORD);
+        // 默认密码，统一使用公共常量
+        String encryptPassword = userService.getEncryptPassword(UserConstant.DEFAULT_PASSWORD);
         user.setUserPassword(encryptPassword);
         boolean result = userService.save(user);
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
@@ -89,6 +120,9 @@ public class UserController {
 
     /**
      * 根据 id 获取用户（仅管理员）
+     *
+     * @param id 用户 id
+     * @return 用户实体类
      */
     @GetMapping("/get")
     @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
@@ -101,16 +135,22 @@ public class UserController {
 
     /**
      * 根据 id 获取包装类
+     *
+     * @param id 用户 id
+     * @return 脱敏后的用户信息
      */
     @GetMapping("/get/vo")
     public BaseResponse<UserVO> getUserVOById(long id) {
-        BaseResponse<User> response = getUserById(id);
-        User user = response.getData();
+        // 复用 getUserById 的查询与校验逻辑
+        User user = this.getUserById(id).getData();
         return ResultUtils.success(userService.getUserVO(user));
     }
 
     /**
-     * 删除用户
+     * 删除用户（仅管理员可用）
+     *
+     * @param deleteRequest 删除请求，包含用户 id
+     * @return 是否删除成功
      */
     @PostMapping("/delete")
     @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
@@ -118,12 +158,19 @@ public class UserController {
         if (deleteRequest == null || deleteRequest.getId() <= 0) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR);
         }
-        boolean b = userService.removeById(deleteRequest.getId());
-        return ResultUtils.success(b);
+        // 判断用户是否存在（公共的校验逻辑，避免直接删除不存在的数据）
+        boolean exists = userService.getById(deleteRequest.getId()) != null;
+        ThrowUtils.throwIf(!exists, ErrorCode.NOT_FOUND_ERROR, "用户不存在");
+        boolean result = userService.removeById(deleteRequest.getId());
+        ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
+        return ResultUtils.success(true);
     }
 
     /**
-     * 更新用户
+     * 更新用户（仅管理员可用）
+     *
+     * @param userUpdateRequest 用户更新请求
+     * @return 是否更新成功
      */
     @PostMapping("/update")
     @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
@@ -142,6 +189,7 @@ public class UserController {
      * 分页获取用户封装列表（仅管理员）
      *
      * @param userQueryRequest 查询请求参数
+     * @return 用户封装类分页数据
      */
     @PostMapping("/list/page/vo")
     @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)

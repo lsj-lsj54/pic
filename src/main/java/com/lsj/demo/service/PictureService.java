@@ -23,10 +23,10 @@ public interface PictureService extends IService<Picture> {
     /**
      * 上传图片
      *
-     * @param multipartFile
-     * @param pictureUploadRequest
-     * @param loginUser
-     * @return
+     * @param multipartFile        上传的图片文件
+     * @param pictureUploadRequest 图片上传请求，id 不为空时表示重新上传
+     * @param loginUser            登录的用户
+     * @return 图片封装类
      */
     PictureVO uploadPicture(MultipartFile multipartFile,
                             PictureUploadRequest pictureUploadRequest,
@@ -34,6 +34,7 @@ public interface PictureService extends IService<Picture> {
 
     /**
      * 获取查询的 queryWrapper
+     *
      * @param pictureQueryRequest 图片请求类
      * @return 可用来查询的 queryWrapper
      */
@@ -41,6 +42,7 @@ public interface PictureService extends IService<Picture> {
 
     /**
      * 获取单个图片的 VO 对象
+     *
      * @param picture picture 对象
      * @param request request 请求
      * @return 对应图片的 VO
@@ -49,13 +51,16 @@ public interface PictureService extends IService<Picture> {
 
     /**
      * 分页获取图片 VO 对象
-     * @param picturePage  page 对象
-     * @param request request 请求
+     *
+     * @param picturePage page 对象
+     * @param request     request 请求
      * @return 分页的 VO
      */
     Page<PictureVO> getPictureVOPage(Page<Picture> picturePage, HttpServletRequest request);
+
     /**
      * 校验参数
+     *
      * @param picture 需要校验的 picture 对象
      */
     void validPicture(Picture picture);

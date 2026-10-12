@@ -40,6 +40,11 @@ public class CosClientConfig {
      */  
     private String bucket;  
   
+    /**
+     * 创建腾讯云 COS 客户端
+     *
+     * @return COS 客户端
+     */
     @Bean
     public COSClient cosClient() {
         // 初始化用户身份信息(secretId, secretKey)  
