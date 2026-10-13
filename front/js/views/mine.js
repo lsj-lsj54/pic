@@ -6,7 +6,7 @@ import {
   $, $$, state, toast, escapeHtml, formatTime, formatSize,
   renderPager, renderEmpty, confirmDialog, REVIEW_STATUS, normalizePage,
 } from '../ui.js';
-import { openPictureDetail, openEditModal, openUploadModal } from '../components/picture.js';
+import { openPictureDetail, openEditModal, openUploadModal, thumbUrl } from '../components/picture.js';
 
 /** 每页数量，后端限制不能超过 20 */
 const PAGE_SIZE = 12;
@@ -65,7 +65,7 @@ function renderGrid(el, page) {
     return `
       <article class="card" data-id="${item.id}">
         <div class="card-img">
-          <img src="${escapeHtml(item.url)}" alt="${escapeHtml(item.name)}" loading="lazy">
+          <img src="${escapeHtml(thumbUrl(item))}" alt="${escapeHtml(item.name)}" loading="lazy">
           <span class="card-badge ${review.cls}">${review.text}</span>
         </div>
         <div class="card-body">

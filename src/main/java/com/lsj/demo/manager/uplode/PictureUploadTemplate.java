@@ -1,5 +1,6 @@
 package com.lsj.demo.manager.uplode;
 
+import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.date.DateUtil;
 import cn.hutool.core.io.FileUtil;
 import cn.hutool.core.util.NumberUtil;
@@ -12,6 +13,8 @@ import com.lsj.demo.exception.ThrowUtils;
 import com.lsj.demo.manager.CosManager;
 import com.lsj.demo.model.dto.file.UploadPictureResult;
 import com.qcloud.cos.model.PutObjectResult;
+import com.qcloud.cos.model.ciModel.persistence.CIObject;
+import com.qcloud.cos.model.ciModel.persistence.CIUploadResult;
 import com.qcloud.cos.model.ciModel.persistence.ImageInfo;
 import lombok.extern.slf4j.Slf4j;
 
@@ -36,13 +39,19 @@ import java.util.List;
 @Slf4j
 public abstract class PictureUploadTemplate {
 
-    /** 单张图片体积上限：2MB */
+    /**
+     * 单张图片体积上限：2MB
+     */
     public static final long MAX_FILE_SIZE = 2 * 1024 * 1024L;
 
-    /** 允许上传的图片后缀 */
+    /**
+     * 允许上传的图片后缀
+     */
     public static final List<String> ALLOW_FORMAT_LIST = Arrays.asList("jpeg", "jpg", "png", "webp");
 
-    /** 允许上传的图片 MIME 类型 */
+    /**
+     * 允许上传的图片 MIME 类型
+     */
     public static final List<String> ALLOW_CONTENT_TYPES =
             Arrays.asList("image/jpeg", "image/jpg", "image/png", "image/webp");
 
@@ -77,11 +86,18 @@ public abstract class PictureUploadTemplate {
             // 4. 把输入源落到临时文件（本地文件直接转存，URL 则下载）
             processFile(inputSource, file);
 
-            // 5. 上传到对象存储
+            // 5. 上传到对象存储（同时产出原图与压缩图）
             PutObjectResult putObjectResult = cosManager.putPictureObject(uploadPath, file);
             ImageInfo imageInfo = getImageInfo(putObjectResult, file, uploadPath);
 
-            // 6. 封装返回结果
+            // 6. 取出压缩图信息。压缩是可选的：
+            //    原图已经是 webp 时不会生成压缩图，此时退回用原图信息
+            CIObject compressedCiObject = getCompressedObject(putObjectResult);
+            if (compressedCiObject != null) {
+                // 尺寸、体积用压缩图的，列表页展示的就是它
+                return buildResult(originFilename, uploadPath, compressedCiObject);
+            }
+            // 没有压缩图：url 与 thumbnailUrl 都指向原图
             return buildResult(originFilename, file, uploadPath, imageInfo);
         } catch (BusinessException e) {
             // 业务异常原样抛出，避免被包装成笼统的「上传失败」
@@ -95,6 +111,73 @@ public abstract class PictureUploadTemplate {
             deleteTempFile(file);
         }
     }
+
+    /**
+     * 取出对象存储生成的压缩图信息
+     *
+     * @param putObjectResult 上传结果
+     * @return 压缩图信息，未生成时返回 null
+     */
+    private CIObject getCompressedObject(PutObjectResult putObjectResult) {
+        CIUploadResult ciUploadResult = putObjectResult.getCiUploadResult();
+        if (ciUploadResult == null || ciUploadResult.getProcessResults() == null) {
+            return null;
+        }
+        List<CIObject> objectList = ciUploadResult.getProcessResults().getObjectList();
+        if (CollUtil.isEmpty(objectList)) {
+            return null;
+        }
+        return objectList.get(0);
+    }
+
+    /**
+     * 封装返回结果（使用压缩图作为缩略图）
+     * <p>
+     * url 保留原始上传路径，thumbnailUrl 指向压缩图，
+     * 这样列表页用缩略图、详情页用原图。
+     *
+     * @param originFilename     原始文件名
+     * @param uploadPath         原图在对象存储中的路径
+     * @param compressedCiObject 压缩图信息
+     * @return 上传结果
+     */
+    private UploadPictureResult buildResult(String originFilename, String uploadPath,
+                                            CIObject compressedCiObject) {
+        UploadPictureResult uploadPictureResult = new UploadPictureResult();
+        // 尺寸与体积都取自压缩图：列表页实际展示的就是它
+        int picWidth = compressedCiObject.getWidth();
+        int picHeight = compressedCiObject.getHeight();
+        double picScale = NumberUtil.round(picWidth * 1.0 / picHeight, 2).doubleValue();
+        uploadPictureResult.setPicName(FileUtil.mainName(originFilename));
+        uploadPictureResult.setPicWidth(picWidth);
+        uploadPictureResult.setPicHeight(picHeight);
+        uploadPictureResult.setPicScale(picScale);
+        uploadPictureResult.setPicFormat(compressedCiObject.getFormat());
+        uploadPictureResult.setPicSize(compressedCiObject.getSize().longValue());
+        // 原图地址
+        uploadPictureResult.setUrl(buildFileUrl(uploadPath));
+        // 压缩图地址：优先用对象存储返回的 key，取不到时按约定推导
+        String compressedKey = StrUtil.isNotBlank(compressedCiObject.getKey())
+                ? compressedCiObject.getKey()
+                : CosManager.buildWebpKey(uploadPath);
+        uploadPictureResult.setThumbnailUrl(buildFileUrl(compressedKey));
+        return uploadPictureResult;
+    }
+
+    /**
+     * 把对象存储路径拼成可访问地址
+     * <p>
+     * uploadPath 以 / 开头，host 末尾不带 /，直接拼接会产生 host//public/...
+     * 这种双斜杠。这里统一去掉多余的那一个，避免同一张图出现两种写法
+     * （对象存储 key 里带不带前导斜杠都由它自己处理，不影响访问）。
+     *
+     * @param path 对象存储路径或 key
+     * @return 完整的访问地址
+     */
+    private String buildFileUrl(String path) {
+        return cosClientConfig.getHost() + "/" + StrUtil.removePrefix(path, "/");
+    }
+
 
     /**
      * 校验输入源（本地文件或 URL）
@@ -219,7 +302,7 @@ public abstract class PictureUploadTemplate {
     }
 
     /**
-     * 封装返回结果
+     * 封装返回结果（没有压缩图时，缩略图退回原图）
      *
      * @param originFilename 原始文件名
      * @param file           临时文件
@@ -239,7 +322,10 @@ public abstract class PictureUploadTemplate {
         uploadPictureResult.setPicScale(picScale);
         uploadPictureResult.setPicFormat(imageInfo.getFormat());
         uploadPictureResult.setPicSize(FileUtil.size(file));
-        uploadPictureResult.setUrl(cosClientConfig.getHost() + "/" + uploadPath);
+        String url = buildFileUrl(uploadPath);
+        uploadPictureResult.setUrl(url);
+        // 没有压缩图，缩略图直接用原图，保证前端不必做空判断
+        uploadPictureResult.setThumbnailUrl(url);
         return uploadPictureResult;
     }
 }

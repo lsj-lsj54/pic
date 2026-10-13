@@ -6,7 +6,7 @@ import {
   $, $$, state, toast, escapeHtml, formatTime, formatSize, truncate, debounce,
   renderPager, renderEmpty, confirmDialog, reviewTag, showModal, closeModal, normalizePage,
 } from '../ui.js';
-import { openEditModal, openUploadModal } from '../components/picture.js';
+import { openEditModal, openUploadModal, thumbUrl } from '../components/picture.js';
 
 const PAGE_SIZE = 10;
 
@@ -112,7 +112,7 @@ function renderTable(el, page) {
       <td>${item.id}</td>
       <td>
         <div class="cell-pic">
-          <img src="${escapeHtml(item.url)}" alt="${escapeHtml(item.name)}" loading="lazy">
+          <img src="${escapeHtml(thumbUrl(item))}" alt="${escapeHtml(item.name)}" loading="lazy">
           <span title="${escapeHtml(item.name)}">${escapeHtml(truncate(item.name, 16))}</span>
         </div>
       </td>

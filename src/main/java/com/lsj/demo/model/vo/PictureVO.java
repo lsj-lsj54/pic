@@ -1,5 +1,6 @@
 package com.lsj.demo.model.vo;
 
+import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONUtil;
 import com.lsj.demo.model.entity.Picture;
 
@@ -21,6 +22,14 @@ public class PictureVO implements Serializable {
      * 图片 url  
      */  
     private String url;  
+
+    /**
+     * 缩略图 url（压缩后的 webp）
+     * <p>
+     * 列表页展示缩略图、详情页展示原图。
+     * 历史数据可能没有这个字段，前端需要回退到 url。
+     */
+    private String thumbnailUrl;
   
     /**  
      * 图片名称  
@@ -133,6 +142,10 @@ public class PictureVO implements Serializable {
         BeanUtils.copyProperties(picture, pictureVO);  
         // 类型不同，需要转换  
         pictureVO.setTags(JSONUtil.toList(picture.getTags(), String.class));  
+        // 历史数据没有缩略图，回退成原图，避免前端列表出现裂图
+        if (StrUtil.isBlank(pictureVO.getThumbnailUrl())) {
+            pictureVO.setThumbnailUrl(picture.getUrl());
+        }
         return pictureVO;  
     }  
 }

@@ -112,11 +112,8 @@ public class PictureController {
         ThrowUtils.throwIf(oldPicture == null, ErrorCode.NOT_FOUND_ERROR);
         // 仅本人或管理员可删除
         PicturePermissionUtils.checkPictureAuth(oldPicture, loginUser, userService);
-        // 操作数据库
-        boolean result = pictureService.removeById(id);
-        ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
-        // 删除后清缓存，避免首页仍显示已删除的图片
-        pictureService.clearPictureCache();
+        // 删库 + 清缓存 + 异步清对象存储
+        pictureService.deletePicture(id);
         return ResultUtils.success(true);
     }
 

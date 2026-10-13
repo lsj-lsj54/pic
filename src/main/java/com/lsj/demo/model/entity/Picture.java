@@ -19,7 +19,15 @@ public class Picture implements Serializable {
      * 图片 url  
      */  
     private String url;  
-  
+
+    /**
+     * 缩略图 url（压缩后的 webp）
+     * <p>
+     * 列表页用它、详情页用 url，兼顾加载速度与画质。
+     * 历史数据该字段可能为空，前端需要回退到 url。
+     */
+    private String thumbnailUrl;
+
     /**  
      * 图片名称  
      */  

@@ -209,7 +209,20 @@ docker exec picture-mysql mysqldump -uroot -p$MYSQL_ROOT_PASSWORD picture > back
 docker compose --env-file deploy/.env -f deploy/docker-compose.yml restart app
 ```
 
-**注意**：`mysql-data` 卷里的数据是持久化的，但 `deploy/mysql/init.sql` **只在数据卷为空时执行一次**。以后再加表，要手动进容器执行 SQL，或者写新的迁移脚本。
+**注意**：`mysql-data` 卷里的数据是持久化的，但 `deploy/mysql/init.sql` **只在数据卷为空时执行一次**。以后加表/加字段，要手动进容器执行 SQL。
+
+已经准备好的增量脚本：
+
+```bash
+# 给已有库补充缩略图字段（缩略图功能需要）
+docker exec -i picture-mysql mysql -uroot -p picture < deploy/mysql/migration-add-thumbnail.sql
+```
+
+也可以直接进容器手动执行：
+
+```bash
+docker exec -it picture-mysql mysql -uroot -p picture
+```
 
 ---
 

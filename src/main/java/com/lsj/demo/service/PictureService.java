@@ -126,4 +126,22 @@ public interface PictureService extends IService<Picture> {
             User loginUser
     );
 
+    /**
+     * 清理图片在对象存储中的文件（原图 + 缩略图）
+     * <p>
+     * 被其他记录引用的图片会被跳过，不会误删公用文件。
+     * 删除失败只记日志，不影响调用方。
+     *
+     * @param oldPicture 已删除的图片记录
+     */
+    void clearPictureFile(Picture oldPicture);
+
+    /**
+     * 删除图片（数据库记录 + 对象存储文件）
+     * <p>
+     * 先删数据库记录，再异步清理对象存储，避免对象存储异常导致请求失败。
+     *
+     * @param pictureId 图片 id
+     */
+    void deletePicture(long pictureId);
 }

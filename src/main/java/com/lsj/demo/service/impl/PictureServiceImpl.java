@@ -18,6 +18,7 @@ import com.lsj.demo.common.PicturePermissionUtils;
 import com.lsj.demo.exception.BusinessException;
 import com.lsj.demo.exception.ErrorCode;
 import com.lsj.demo.exception.ThrowUtils;
+import com.lsj.demo.manager.CosManager;
 import com.lsj.demo.manager.factory.UploadFactory;
 import com.lsj.demo.manager.uplode.PictureUploadTemplate;
 import com.lsj.demo.model.dto.picture.PictureQueryRequest;
@@ -95,6 +96,9 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
     @Resource
     private StringRedisTemplate stringRedisTemplate;
 
+    @Resource
+    private CosManager cosManager;
+
     /** 图片列表缓存的 key 前缀 */
     private static final String CACHE_KEY_PREFIX = "picture:listVO:";
 
@@ -169,6 +173,8 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         // 构造要入库的图片信息
         Picture picture = new Picture();
         picture.setUrl(uploadPictureResult.getUrl());
+        // 缩略图：列表页用它，详情页用原图
+        picture.setThumbnailUrl(uploadPictureResult.getThumbnailUrl());
         // 允许调用方指定名称（批量抓取时用来生成「搜索词+序号」），未指定则用原始文件名
         String picName = uploadPictureResult.getPicName();
         if (pictureUploadRequest != null && StrUtil.isNotBlank(pictureUploadRequest.getPicName())) {
@@ -693,5 +699,64 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         }, false);
     }
 
+    /**
+     * 删除图片（数据库记录 + 对象存储文件）
+     * <p>
+     * 顺序上先删库再清对象存储：对象存储清理失败只会留下无引用的文件，
+     * 不影响用户看到的结果；反过来先删文件再删库，一旦删库失败就会出现「记录在、图打不开」。
+     *
+     * @param pictureId 图片 id
+     */
+    @Override
+    public void deletePicture(long pictureId) {
+        // 先取出记录，删掉之后就查不到 url 了
+        Picture oldPicture = this.getById(pictureId);
+        ThrowUtils.throwIf(oldPicture == null, ErrorCode.NOT_FOUND_ERROR, "图片不存在");
+
+        boolean result = this.removeById(pictureId);
+        ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR, "删除失败");
+
+        // 缓存里的列表还带着这张图，必须清掉
+        clearPictureCache();
+        // 异步清理对象存储，失败只记日志，不影响本次删除结果
+        clearPictureFile(oldPicture);
+    }
+
+    /**
+     * 清理图片对应的对象存储文件
+     * <p>
+     * 只有确定这张图片不再被其他记录引用时才删，避免误删公用的文件。
+     * 传入的是完整访问地址，由 CosManager 负责反推对象 key ——
+     * 直接把 URL 当 key 传给对象存储是删不掉任何东西的。
+     * <p>
+     * 说明：这里是同步执行的，删除失败会被 CosManager 吞掉并记日志。
+     * 之前标的 @Async 实际不生效（deletePicture 内部是 this 调用，绕过了 Spring 代理），
+     * 与其留个假注释不如直接说明：删除是低频操作，同步执行更可预期。
+     *
+     * @param oldPicture 已删除的图片记录
+     */
+    @Override
+    public void clearPictureFile(Picture oldPicture) {
+        if (oldPicture == null) {
+            return;
+        }
+        // 判断该图片是否被多条记录使用
+        String pictureUrl = oldPicture.getUrl();
+        long count = this.lambdaQuery()
+                .eq(Picture::getUrl, pictureUrl)
+                .count();
+        // 有不止一条记录用到了该图片，不清理
+        if (count > 1) {
+            log.info("该图片仍被 {} 条记录引用，跳过对象存储清理: {}", count, pictureUrl);
+            return;
+        }
+        // 删原图
+        cosManager.deleteObjectByUrl(pictureUrl);
+        // 删缩略图（历史数据可能没有）
+        String thumbnailUrl = oldPicture.getThumbnailUrl();
+        if (StrUtil.isNotBlank(thumbnailUrl) && !thumbnailUrl.equals(pictureUrl)) {
+            cosManager.deleteObjectByUrl(thumbnailUrl);
+        }
+    }
 
 }

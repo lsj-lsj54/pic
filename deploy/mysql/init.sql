@@ -33,7 +33,8 @@ CREATE TABLE IF NOT EXISTS `user`
 CREATE TABLE IF NOT EXISTS `picture`
 (
     id            bigint AUTO_INCREMENT COMMENT 'id' PRIMARY KEY,
-    url           varchar(512)                       NOT NULL COMMENT '图片 url',
+    url           varchar(512)                       NOT NULL COMMENT '图片 url（原图）',
+    thumbnailUrl  varchar(512)                       NULL COMMENT '缩略图 url（压缩后的 webp），列表页使用',
     name          varchar(128)                       NOT NULL COMMENT '图片名称',
     introduction  varchar(512)                       NULL COMMENT '简介',
     category      varchar(64)                        NULL COMMENT '分类',

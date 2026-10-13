@@ -433,6 +433,35 @@ function canEdit(picture) {
 }
 
 /**
+ * 列表页展示用的缩略图地址
+ * <p>
+ * 优先用后端上传时生成的压缩图（webp），体积通常只有原图的一小部分。
+ * 历史数据该字段为空，回退到原图，保证不会出现裂图。
+ *
+ * @param {object} picture 图片对象
+ * @returns {string} 可展示的图片地址
+ */
+export function thumbUrl(picture) {
+  if (!picture) {
+    return '';
+  }
+  return picture.thumbnailUrl || picture.url || '';
+}
+
+/**
+ * 详情页展示用的原图地址
+ *
+ * @param {object} picture 图片对象
+ * @returns {string} 原图地址
+ */
+export function originUrl(picture) {
+  if (!picture) {
+    return '';
+  }
+  return picture.url || picture.thumbnailUrl || '';
+}
+
+/**
  * 图片详情弹窗
  *
  * @param {string|number} id      图片 id
@@ -456,19 +485,20 @@ export async function openPictureDetail(id, { onChanged } = {}) {
     content: `
       <div class="detail">
         <div class="detail-img">
-          <img src="${escapeHtml(picture.url)}" alt="${escapeHtml(picture.name)}">
+          <img src="${escapeHtml(originUrl(picture))}" alt="${escapeHtml(picture.name)}">
         </div>
         <div class="detail-info">
           <div class="detail-row"><span>简介</span><p>${escapeHtml(picture.introduction) || '暂无简介'}</p></div>
           <div class="detail-row"><span>分类</span><p>${escapeHtml(picture.category) || '未分类'}</p></div>
           <div class="detail-row"><span>标签</span><p>${tags || '无'}</p></div>
           <div class="detail-row"><span>尺寸</span><p>${picture.picWidth || '-'} × ${picture.picHeight || '-'}</p></div>
-          <div class="detail-row"><span>体积</span><p>${formatSize(picture.picSize)}</p></div>
+          <div class="detail-row"><span>缩略图</span><p>${formatSize(picture.picSize)}
+            （列表页加载的资源大小）</p></div>
           <div class="detail-row"><span>上传者</span><p>${escapeHtml(picture.user
     ? picture.user.userName || picture.user.userAccount : '-')}</p></div>
           <div class="detail-row"><span>上传时间</span><p>${formatTime(picture.createTime)}</p></div>
           <div class="detail-actions">
-            <a class="btn btn-sm" href="${escapeHtml(picture.url)}" target="_blank" rel="noopener">查看原图</a>
+            <a class="btn btn-sm" href="${escapeHtml(originUrl(picture))}" target="_blank" rel="noopener">查看原图</a>
             ${editable ? '<button class="btn btn-sm btn-primary" id="detail-edit" type="button">编辑信息</button>' : ''}
             ${editable ? '<button class="btn btn-sm" id="detail-reupload" type="button">重新上传</button>' : ''}
           </div>
