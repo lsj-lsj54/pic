@@ -16,9 +16,9 @@ import com.lsj.demo.model.dto.picture.*;
 import com.lsj.demo.model.entity.Picture;
 import com.lsj.demo.model.entity.User;
 import com.lsj.demo.model.enums.FileUploadEnum;
-import com.lsj.demo.model.enums.PictureReviewStatusEnum;
 import com.lsj.demo.model.vo.PictureVO;
 import com.lsj.demo.service.PictureService;
+import com.lsj.demo.service.SpaceService;
 import com.lsj.demo.service.UserService;
 import org.springframework.beans.BeanUtils;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -49,6 +49,12 @@ public class PictureController {
 
     @Resource
     private UserService userService;
+
+    /**
+     * 空间服务：编辑图片时要校验图片是否在别人的私有空间里
+     */
+    @Resource
+    private SpaceService spaceService;
 
     /**
      * 上传图片（本地文件，可重新上传）
@@ -107,13 +113,8 @@ public class PictureController {
         }
         User loginUser = userService.getLoginUser(request);
         long id = deleteRequest.getId();
-        // 判断是否存在
-        Picture oldPicture = pictureService.getById(id);
-        ThrowUtils.throwIf(oldPicture == null, ErrorCode.NOT_FOUND_ERROR);
-        // 仅本人或管理员可删除
-        PicturePermissionUtils.checkPictureAuth(oldPicture, loginUser, userService);
-        // 删库 + 清缓存 + 异步清对象存储
-        pictureService.deletePicture(id);
+        // 删库 + 空间校验 + 释放空间容量 + 清缓存 + 清对象存储
+        pictureService.deletePicture(id, loginUser);
         return ResultUtils.success(true);
     }
 
@@ -206,6 +207,9 @@ public class PictureController {
 
     /**
      * 分页获取图片列表（封装类）
+     * <p>
+     * 可分页查询公共图库（spaceId 为空，仅已过审图片）或自己的私有空间（spaceId 不为空，
+     * 只有空间创建者能查），其他用户的空间会被拒绝。
      *
      * @param pictureQueryRequest 图片查询请求
      * @param request             request 请求
@@ -215,17 +219,8 @@ public class PictureController {
     public BaseResponse<Page<PictureVO>> listPictureVOByPage(@RequestBody PictureQueryRequest pictureQueryRequest,
                                                              HttpServletRequest request) {
         ThrowUtils.throwIf(pictureQueryRequest == null, ErrorCode.PARAMS_ERROR);
-        long current = pictureQueryRequest.getCurrent();
-        long size = pictureQueryRequest.getPageSize();
-        // 限制爬虫
-        ThrowUtils.throwIf(size > 20, ErrorCode.PARAMS_ERROR);
-        // 普通用户默认只能查看已过审的数据
-        pictureQueryRequest.setReviewStatus(PictureReviewStatusEnum.PASS.getValue());
-        // 查询数据库
-        Page<Picture> picturePage = pictureService.page(new Page<>(current, size),
-                pictureService.getQueryWrapper(pictureQueryRequest));
-        // 获取封装类
-        return ResultUtils.success(pictureService.getPictureVOPage(picturePage, request));
+        // 空间校验与查询条件都在 service 内统一处理
+        return ResultUtils.success(pictureService.listPictureVOByPage(pictureQueryRequest, request));
     }
 
     /**
@@ -274,8 +269,8 @@ public class PictureController {
         long id = pictureEditRequest.getId();
         Picture oldPicture = pictureService.getById(id);
         ThrowUtils.throwIf(oldPicture == null, ErrorCode.NOT_FOUND_ERROR);
-        // 仅本人或管理员可编辑
-        PicturePermissionUtils.checkPictureAuth(oldPicture, loginUser, userService);
+        // 仅本人或管理员可编辑；图片在私有空间里时还要求是该空间的创建者
+        PicturePermissionUtils.checkPictureAuth(oldPicture, loginUser, userService, spaceService);
         // 补充审核参数
         pictureService.fillReviewParams(picture, loginUser);
         // 操作数据库

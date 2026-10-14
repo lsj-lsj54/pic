@@ -7,6 +7,7 @@ import com.lsj.demo.model.dto.picture.PictureReviewRequest;
 import com.lsj.demo.model.dto.picture.PictureUploadByBatchRequest;
 import com.lsj.demo.model.dto.picture.PictureUploadRequest;
 import com.lsj.demo.model.entity.Picture;
+import com.lsj.demo.model.entity.Space;
 import com.lsj.demo.model.entity.User;
 import com.lsj.demo.model.vo.PictureVO;
 
@@ -14,6 +15,7 @@ import com.baomidou.mybatisplus.extension.service.IService;
 import org.springframework.web.multipart.MultipartFile;
 
 import javax.servlet.http.HttpServletRequest;
+import java.util.List;
 
 /**
 * @author lsj
@@ -72,10 +74,27 @@ public interface PictureService extends IService<Picture> {
     Page<PictureVO> getPictureVOPage(Page<Picture> picturePage, HttpServletRequest request);
 
     /**
+     * 分页获取图片 VO 对象
+     * <p>
+     * 空间规则：
+     * <ul>
+     *     <li>spaceId 为空：只返回公共空间的图片，且只返回已过审的图片，任何人可看</li>
+     *     <li>spaceId 不为空：只允许该空间的创建者（或管理员）查询，能看到空间内全部图片</li>
+     * </ul>
+     *
+     * @param pictureQueryRequest 图片查询请求
+     * @param request             request 请求
+     * @return 分页的 VO
+     */
+    Page<PictureVO> listPictureVOByPage(PictureQueryRequest pictureQueryRequest,
+                                       HttpServletRequest request);
+
+    /**
      * 分页获取图片 VO 对象（带多级缓存）
      * <p>
      * Caffeine（本地）→ Redis（分布式）→ 数据库，逐级回填。
-     * 只缓存普通用户可见的公开数据（强制 reviewStatus = 已通过）。
+     * 缓存的是所有人共享的公共空间数据，因此只对 spaceId 为空（公共空间）的查询生效；
+     * 查私有空间时校验完权限直接走数据库，不读也不写缓存，避免把别人的私有图片缓存出去。
      *
      * @param pictureQueryRequest 图片查询请求
      * @param request             request 请求
@@ -139,9 +158,16 @@ public interface PictureService extends IService<Picture> {
     /**
      * 删除图片（数据库记录 + 对象存储文件）
      * <p>
-     * 先删数据库记录，再异步清理对象存储，避免对象存储异常导致请求失败。
+     * 先删数据库记录，再清理对象存储，避免对象存储异常导致请求失败。
+     * 删除前会做空间校验：公共空间的图片仅上传者本人可删，
+     * 私有空间的图片仅空间创建者（或管理员）可删。
      *
      * @param pictureId 图片 id
+     * @param loginUser 当前登录用户
      */
-    void deletePicture(long pictureId);
+    void deletePicture(long pictureId, User loginUser);
+
+    List<Picture> getListPictureBySpaceId(Space space);
+
+    void deleteBatchIds(List<Long> list);
 }

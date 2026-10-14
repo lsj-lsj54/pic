@@ -30,5 +30,13 @@ public class PictureUploadRequest implements Serializable {
 
     private String picName;
 
+    /**
+     * 空间 id
+     * <p>
+     * 为空表示上传到公共空间；不为空表示上传到该私有空间，
+     * 只允许空间创建者（或管理员）上传，并会校验空间容量。
+     */
+    private Long spaceId;
+
     private static final long serialVersionUID = 1L;
 }

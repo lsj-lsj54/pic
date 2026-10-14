@@ -104,6 +104,14 @@ public class PictureVO implements Serializable {
      */
     private Integer reviewStatus;
 
+    /**
+     * 空间 id
+     * <p>
+     * 为空表示公共空间（公共图库），不为空表示该图片属于对应的私有空间。
+     * 前端据此区分公共图库和私有空间。
+     */
+    private Long spaceId;
+
     /**  
      * 创建用户信息  
      */  
@@ -111,13 +119,13 @@ public class PictureVO implements Serializable {
   
     private static final long serialVersionUID = 1L;  
   
-    /**  
-     * 封装类转对象
+    /**
+     * 封装类转实体类
      *
      * @param pictureVO 图片封装类
-     * @return 图片实体类
-     */  
-    public static Picture voToObj(PictureVO pictureVO) {
+     * @return 图片实体类，入参为 null 时返回 null
+     */
+    public static Picture voToEntity(PictureVO pictureVO) {
         if (pictureVO == null) {  
             return null;  
         }  
@@ -128,13 +136,13 @@ public class PictureVO implements Serializable {
         return picture;  
     }  
   
-    /**  
-     * 对象转封装类
+    /**
+     * 实体类转封装类
      *
      * @param picture 图片实体类
-     * @return 图片封装类
-     */  
-    public static PictureVO objToVo(Picture picture) {  
+     * @return 图片封装类，入参为 null 时返回 null
+     */
+    public static PictureVO entityToVo(Picture picture) {  
         if (picture == null) {  
             return null;  
         }  

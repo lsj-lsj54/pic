@@ -12,7 +12,6 @@ import com.lsj.demo.model.vo.LoginUserVO;
 import com.lsj.demo.service.UserService;
 import com.lsj.demo.mapper.UserMapper;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.BeanUtils;
 import org.springframework.stereotype.Service;
 import org.springframework.util.CollectionUtils;
 import org.springframework.util.DigestUtils;
@@ -142,12 +141,8 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
      */
     @Override
     public LoginUserVO getLoginUserVO(User user) {
-        if (user == null) {
-            return null;
-        }
-        LoginUserVO loginUserVO = new LoginUserVO();
-        BeanUtils.copyProperties(user, loginUserVO);
-        return loginUserVO;
+        // 实体转封装类统一走 VO 自己的工厂方法，避免各处重复写 BeanUtils
+        return LoginUserVO.entityToVo(user);
     }
 
     /**
@@ -171,6 +166,23 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
             throw new BusinessException(ErrorCode.NOT_LOGIN_ERROR);
         }
         return currentUser;
+    }
+
+    /**
+     * 获取当前登录用户，未登录时返回 null（不抛异常）
+     *
+     * @param request request 请求
+     * @return 当前登录用户，未登录或用户已被删除时返回 null
+     */
+    @Override
+    public User getLoginUserOrNull(HttpServletRequest request) {
+        Object userObj = request.getSession().getAttribute(USER_LOGIN_STATE);
+        User currentUser = (User) userObj;
+        if (currentUser == null || currentUser.getId() == null) {
+            return null;
+        }
+        // 会话里的用户可能是旧数据（改过角色/已注销），以数据库为准
+        return this.getById(currentUser.getId());
     }
 
     /**
@@ -199,12 +211,8 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
      */
     @Override
     public UserVO getUserVO(User user) {
-        if (user == null) {
-            return null;
-        }
-        UserVO userVO = new UserVO();
-        BeanUtils.copyProperties(user, userVO);
-        return userVO;
+        // 实体转封装类统一走 VO 自己的工厂方法，避免各处重复写 BeanUtils
+        return UserVO.entityToVo(user);
     }
 
     /**

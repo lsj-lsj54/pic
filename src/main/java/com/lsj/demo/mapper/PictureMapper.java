@@ -4,6 +4,7 @@ package com.lsj.demo.mapper;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.lsj.demo.model.entity.Picture;
 
+
 /**
 * @author lsj
 * @description 针对表【picture(图片)】的数据库操作Mapper

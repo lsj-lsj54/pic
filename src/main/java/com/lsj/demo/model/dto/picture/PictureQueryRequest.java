@@ -86,6 +86,14 @@ public class PictureQueryRequest extends PageRequest implements Serializable {
      */
     private Long reviewerId;
 
+    /**
+     * 空间 id
+     * <p>
+     * 为空表示只查公共空间的图片；不为空表示查该私有空间下的图片，
+     * 私有空间只允许空间创建者（或管理员）查询。
+     */
+    private Long spaceId;
+
 
 
     private static final long serialVersionUID = 1L;  

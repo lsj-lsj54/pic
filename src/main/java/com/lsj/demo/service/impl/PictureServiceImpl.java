@@ -3,18 +3,17 @@ package com.lsj.demo.service.impl;
 
 import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.lang.TypeReference;
-import cn.hutool.core.util.ObjUtil;
-import cn.hutool.core.util.RandomUtil;
-import cn.hutool.core.util.StrUtil;
-import cn.hutool.core.util.URLUtil;
+import cn.hutool.core.util.*;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.extension.conditions.query.LambdaQueryChainWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.lsj.demo.common.PicturePermissionUtils;
+import com.lsj.demo.common.SpacePermissionUtils;
 import com.lsj.demo.exception.BusinessException;
 import com.lsj.demo.exception.ErrorCode;
 import com.lsj.demo.exception.ThrowUtils;
@@ -25,6 +24,7 @@ import com.lsj.demo.model.dto.picture.PictureQueryRequest;
 import com.lsj.demo.model.dto.picture.PictureReviewRequest;
 import com.lsj.demo.model.dto.picture.PictureUploadByBatchRequest;
 import com.lsj.demo.model.dto.picture.PictureUploadRequest;
+import com.lsj.demo.model.entity.Space;
 import com.lsj.demo.model.entity.User;
 import com.lsj.demo.mapper.PictureMapper;
 import com.lsj.demo.model.dto.file.UploadPictureResult;
@@ -34,6 +34,7 @@ import com.lsj.demo.model.enums.PictureReviewStatusEnum;
 import com.lsj.demo.model.vo.PictureVO;
 import com.lsj.demo.model.vo.UserVO;
 import com.lsj.demo.service.PictureService;
+import com.lsj.demo.service.SpaceService;
 import com.lsj.demo.service.UserService;
 import lombok.extern.slf4j.Slf4j;
 import org.jsoup.Jsoup;
@@ -89,6 +90,15 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
     @Resource
     private UserService userService;
 
+    /**
+     * 空间服务：图片归属空间后，上传、删除、查看都要做空间校验，并维护空间用量。
+     * <p>
+     * 空间服务删除空间时会反过来调用本服务清理空间内的图片，
+     * 循环依赖由 SpaceServiceImpl 侧的 @Lazy 打断，这里正常注入即可。
+     */
+    @Resource
+    private SpaceService spaceService;
+
 
     @Resource
     private UploadFactory uploadFactory;
@@ -99,13 +109,19 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
     @Resource
     private CosManager cosManager;
 
-    /** 图片列表缓存的 key 前缀 */
+    /**
+     * 图片列表缓存的 key 前缀
+     */
     private static final String CACHE_KEY_PREFIX = "picture:listVO:";
 
-    /** 缓存基础过期时间（秒） */
+    /**
+     * 缓存基础过期时间（秒）
+     */
     private static final int CACHE_EXPIRE_BASE_SECONDS = 300;
 
-    /** 在基础过期时间上叠加的随机秒数，避免缓存同时失效 */
+    /**
+     * 在基础过期时间上叠加的随机秒数，避免缓存同时失效
+     */
     private static final int CACHE_EXPIRE_JITTER_SECONDS = 300;
 
     /**
@@ -158,17 +174,47 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
 
         // 判断是新增还是覆盖已有图片
         Long pictureId = pictureUploadRequest == null ? null : pictureUploadRequest.getId();
+        Picture oldPicture = null;
         if (pictureId != null) {
-            Picture oldPicture = this.getById(pictureId);
+            oldPicture = this.getById(pictureId);
             ThrowUtils.throwIf(oldPicture == null, ErrorCode.NOT_FOUND_ERROR, "图片不存在");
-            // 仅本人或管理员可覆盖，避免越权改别人的图
-            PicturePermissionUtils.checkPictureAuth(oldPicture, loginUser, userService);
+            // 仅本人或管理员可覆盖；图片在私有空间里时还要求是该空间的创建者
+            PicturePermissionUtils.checkPictureAuth(oldPicture, loginUser, userService, spaceService);
+        }
+
+        // 目标空间：spaceId 为空表示公共空间，不为空表示上传到对应的私有空间
+        Long spaceId = pictureUploadRequest == null ? null : pictureUploadRequest.getSpaceId();
+        if (spaceId == null && oldPicture != null) {
+            // 覆盖上传又没带 spaceId 时，保持图片原有归属，避免把私有空间里的图片意外挪进公共图库
+            spaceId = oldPicture.getSpaceId();
+        }
+        Long oldSpaceId = oldPicture == null ? null : oldPicture.getSpaceId();
+        long oldSize = oldPicture == null || oldPicture.getPicSize() == null ? 0L : oldPicture.getPicSize();
+        // 空间必须存在且属于当前用户（管理员除外）
+        Space space = getAndCheckSpace(spaceId, loginUser);
+        // 同一空间内覆盖上传不会新增图片，被覆盖图片占用的容量也可以抵扣
+        boolean sameSpace = spaceId != null && spaceId.equals(oldSpaceId);
+        long countDelta = spaceId != null && !sameSpace ? 1L : 0L;
+        // 数量先校验：空间已经放不下时就不用白跑一趟上传了
+        if (space != null) {
+            checkSpaceCount(space, countDelta > 0);
         }
 
         // 按上传方式取出对应实现，按用户 id 划分目录
         String uploadPathPrefix = String.format("public/%s", loginUser.getId());
         PictureUploadTemplate uploadTemplate = uploadFactory.getUploadTemplate(uploadType);
         UploadPictureResult uploadPictureResult = uploadTemplate.uploadPicture(inputSource, uploadPathPrefix);
+
+        // 容量要等拿到真实文件大小才能算，超限就把刚上传的文件删掉，不给对象存储留垃圾
+        long newSize = uploadPictureResult.getPicSize() == null ? 0L : uploadPictureResult.getPicSize();
+        if (space != null) {
+            try {
+                checkSpaceSize(space, newSize, sameSpace ? oldSize : 0L);
+            } catch (RuntimeException e) {
+                deleteUploadedFile(uploadPictureResult);
+                throw e;
+            }
+        }
 
         // 构造要入库的图片信息
         Picture picture = new Picture();
@@ -187,6 +233,8 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         picture.setPicScale(uploadPictureResult.getPicScale());
         picture.setPicFormat(uploadPictureResult.getPicFormat());
         picture.setUserId(loginUser.getId());
+        // 归属空间：前端据此区分公共图库和私有空间
+        picture.setSpaceId(spaceId);
         // 补充审核参数
         fillReviewParams(picture, loginUser);
 
@@ -197,9 +245,87 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         }
         boolean result = this.saveOrUpdate(picture);
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR, "图片上传失败");
+        // 维护空间用量：图片离开旧空间要扣减，进入新空间要累加
+        if (oldSpaceId != null && !oldSpaceId.equals(spaceId)) {
+            spaceService.updateSpaceUsage(oldSpaceId, -1L, -oldSize);
+        }
+        if (spaceId != null) {
+            long sizeDelta = newSize - (sameSpace ? oldSize : 0L);
+            spaceService.updateSpaceUsage(spaceId, countDelta, sizeDelta);
+        }
         // 数据变了，首页缓存要失效，否则会一直看到旧列表
         clearPictureCache();
-        return PictureVO.objToVo(picture);
+        return PictureVO.entityToVo(picture);
+    }
+
+    /**
+     * 取出目标空间并校验归属
+     *
+     * @param spaceId   空间 id，为空表示公共空间
+     * @param loginUser 当前登录用户
+     * @return 目标空间，spaceId 为空时返回 null
+     */
+    private Space getAndCheckSpace(Long spaceId, User loginUser) {
+        if (spaceId == null) {
+            // 公共空间不属于任何人，不需要校验
+            return null;
+        }
+        Space space = spaceService.getById(spaceId);
+        ThrowUtils.throwIf(space == null, ErrorCode.NOT_FOUND_ERROR, "空间不存在");
+        // 非管理员只能往自己的空间里传图
+        SpacePermissionUtils.checkSpaceAuth(space, loginUser, userService);
+        return space;
+    }
+
+    /**
+     * 校验空间还能不能再放下一张图片
+     *
+     * @param space          目标空间
+     * @param countIncrement 本次上传是否会给空间增加一条图片
+     */
+    private void checkSpaceCount(Space space, boolean countIncrement) {
+        if (!countIncrement) {
+            return;
+        }
+        long maxCount = space.getMaxCount() == null ? 0L : space.getMaxCount();
+        long totalCount = space.getTotalCount() == null ? 0L : space.getTotalCount();
+        ThrowUtils.throwIf(totalCount + 1 > maxCount, ErrorCode.OPERATION_ERROR,
+                "空间图片数量已满，请先清理空间或升级空间");
+    }
+
+    /**
+     * 校验空间容量是否还放得下这张图片
+     *
+     * @param space        目标空间
+     * @param newSize      本次上传图片的大小（字节）
+     * @param releasedSize 被覆盖图片原先占用的容量，覆盖同一空间内的图片时可抵扣
+     */
+    private void checkSpaceSize(Space space, long newSize, long releasedSize) {
+        long maxSize = space.getMaxSize() == null ? 0L : space.getMaxSize();
+        long totalSize = space.getTotalSize() == null ? 0L : space.getTotalSize();
+        ThrowUtils.throwIf(totalSize - releasedSize + newSize > maxSize, ErrorCode.OPERATION_ERROR,
+                "空间容量不足，请先清理空间或升级空间");
+    }
+
+    /**
+     * 删除刚上传成功、但没能入库的对象存储文件
+     * <p>
+     * 容量校验失败等场景下用，避免对象存储里堆积没有任何记录引用的垃圾文件。
+     *
+     * @param uploadPictureResult 上传结果
+     */
+    private void deleteUploadedFile(UploadPictureResult uploadPictureResult) {
+        if (uploadPictureResult == null) {
+            return;
+        }
+        String url = uploadPictureResult.getUrl();
+        if (StrUtil.isNotBlank(url)) {
+            cosManager.deleteObjectByUrl(url);
+        }
+        String thumbnailUrl = uploadPictureResult.getThumbnailUrl();
+        if (StrUtil.isNotBlank(thumbnailUrl) && !thumbnailUrl.equals(url)) {
+            cosManager.deleteObjectByUrl(thumbnailUrl);
+        }
     }
 
 
@@ -233,6 +359,7 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         Integer reviewStatus = pictureQueryRequest.getReviewStatus();
         String reviewMessage = pictureQueryRequest.getReviewMessage();
         Long reviewerId = pictureQueryRequest.getReviewerId();
+        Long spaceId = pictureQueryRequest.getSpaceId();
 
         // 从多字段中搜索
         if (StrUtil.isNotBlank(searchText)) {
@@ -255,6 +382,7 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         queryWrapper.eq(ObjUtil.isNotEmpty(reviewStatus), "reviewStatus", reviewStatus);
         queryWrapper.like(StrUtil.isNotBlank(reviewMessage), "reviewMessage", reviewMessage);
         queryWrapper.eq(ObjUtil.isNotEmpty(reviewerId), "reviewerId", reviewerId);
+        queryWrapper.eq(ObjUtil.isNotEmpty(spaceId), "spaceId", spaceId);
 
         // JSON 数组查询
         if (CollUtil.isNotEmpty(tags)) {
@@ -276,8 +404,10 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
      */
     @Override
     public PictureVO getPictureVO(Picture picture, HttpServletRequest request) {
-        // 对象转封装类
-        PictureVO pictureVO = PictureVO.objToVo(picture);
+        // 私有空间里的图片只有空间创建者（或管理员）能看，公共空间里的图片所有人可见
+        checkPictureViewAuth(picture, request);
+        // 实体转封装类
+        PictureVO pictureVO = PictureVO.entityToVo(picture);
         // 关联查询用户信息
         Long userId = picture.getUserId();
         if (userId != null && userId > 0) {
@@ -286,6 +416,64 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
             pictureVO.setUser(userVO);
         }
         return pictureVO;
+    }
+
+    /**
+     * 校验当前请求能否查看这张图片
+     * <p>
+     * 公共空间（spaceId 为空）的图片任何人可看；私有空间的图片只允许空间创建者和管理员看，
+     * 未登录或访问别人的空间都直接拒绝。
+     *
+     * @param picture picture 图片
+     * @param request request 请求
+     */
+    private void checkPictureViewAuth(Picture picture, HttpServletRequest request) {
+        ThrowUtils.throwIf(picture == null, ErrorCode.PARAMS_ERROR, "图片不能为空");
+        Long spaceId = picture.getSpaceId();
+        if (spaceId == null) {
+            return;
+        }
+        Space space = spaceService.getById(spaceId);
+        ThrowUtils.throwIf(space == null, ErrorCode.NOT_FOUND_ERROR, "空间不存在");
+        // 未登录时 getLoginUserOrNull 返回 null，checkSpaceViewAuth 会按无权限处理
+        SpacePermissionUtils.checkSpaceViewAuth(space, userService.getLoginUserOrNull(request), userService);
+    }
+
+    /**
+     * 分页查询图片 VO
+     * <p>
+     * spaceId 为空：只查公共空间、且只查已过审的图片，所有人可见；
+     * spaceId 不为空：先校验空间归属，只有空间创建者（或管理员）能查，可看到空间内全部图片。
+     *
+     * @param pictureQueryRequest 图片查询请求
+     * @param request             request 请求
+     * @return 分页的 VO
+     */
+    @Override
+    public Page<PictureVO> listPictureVOByPage(PictureQueryRequest pictureQueryRequest,
+                                               HttpServletRequest request) {
+        ThrowUtils.throwIf(pictureQueryRequest == null, ErrorCode.PARAMS_ERROR);
+        long current = pictureQueryRequest.getCurrent();
+        long size = pictureQueryRequest.getPageSize();
+        // 限制爬虫
+        ThrowUtils.throwIf(size > 20, ErrorCode.PARAMS_ERROR, "每页最多 20 条");
+        Long spaceId = pictureQueryRequest.getSpaceId();
+        if (spaceId == null) {
+            // 公共图库：所有人可见，但只能看到已过审的图片
+            pictureQueryRequest.setReviewStatus(PictureReviewStatusEnum.PASS.getValue());
+        } else {
+            // 私有空间：不能查看别人的空间
+            Space space = spaceService.getById(spaceId);
+            ThrowUtils.throwIf(space == null, ErrorCode.NOT_FOUND_ERROR, "空间不存在");
+            SpacePermissionUtils.checkSpaceViewAuth(space, userService.getLoginUserOrNull(request), userService);
+        }
+        QueryWrapper<Picture> queryWrapper = this.getQueryWrapper(pictureQueryRequest);
+        if (spaceId == null) {
+            // 必须显式限定「只查公共空间」，否则会把别人私有空间里的图片一并查出来
+            queryWrapper.isNull("spaceId");
+        }
+        Page<Picture> picturePage = this.page(new Page<>(current, size), queryWrapper);
+        return this.getPictureVOPage(picturePage, request);
     }
 
     /**
@@ -303,7 +491,7 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
             return pictureVOPage;
         }
         // 对象列表 => 封装对象列表
-        List<PictureVO> pictureVOList = pictureList.stream().map(PictureVO::objToVo).collect(Collectors.toList());
+        List<PictureVO> pictureVOList = pictureList.stream().map(PictureVO::entityToVo).collect(Collectors.toList());
         // 1. 关联查询用户信息
         Set<Long> userIdSet = pictureList.stream().map(Picture::getUserId).collect(Collectors.toSet());
         Map<Long, List<User>> userIdUserListMap = userService.listByIds(userIdSet).stream()
@@ -574,8 +762,9 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
      * <p>
      * 缓存策略：Caffeine（本地）→ Redis（分布式）→ 数据库，逐级回填。
      * <p>
-     * 只对普通用户可见的公开数据做缓存：这里强制 reviewStatus = PASS，
+     * 只对公共空间的数据做缓存：这里强制 spaceId 为空、reviewStatus = PASS，
      * 所以缓存内容与用户身份无关，可以放心共用同一个 key。
+     * 查私有空间时结果因人而异，不能进公共缓存，校验完权限直接走数据库。
      *
      * @param pictureQueryRequest 图片查询请求
      * @param request             request 请求
@@ -585,6 +774,10 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
     public Page<PictureVO> listPictureVOByPageWithCache(PictureQueryRequest pictureQueryRequest,
                                                         HttpServletRequest request) {
         ThrowUtils.throwIf(pictureQueryRequest == null, ErrorCode.PARAMS_ERROR);
+        if (pictureQueryRequest.getSpaceId() != null) {
+            // 私有空间：不做缓存，交给带空间校验的查询方法
+            return this.listPictureVOByPage(pictureQueryRequest, request);
+        }
         long current = pictureQueryRequest.getCurrent();
         long size = pictureQueryRequest.getPageSize();
         // 限制爬虫
@@ -614,8 +807,10 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         }
 
         // 3. 查数据库
-        Page<Picture> picturePage = this.page(new Page<>(current, size),
-                this.getQueryWrapper(pictureQueryRequest));
+        QueryWrapper<Picture> queryWrapper = this.getQueryWrapper(pictureQueryRequest);
+        // 缓存的是公共图库，必须排除私有空间里的图片
+        queryWrapper.isNull("spaceId");
+        Page<Picture> picturePage = this.page(new Page<>(current, size), queryWrapper);
         Page<PictureVO> pictureVOPage = this.getPictureVOPage(picturePage, request);
 
         // 4. 回填两级缓存
@@ -642,6 +837,7 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         LOCAL_CACHE.invalidateAll();
         log.debug("本地图片缓存已清除");
     }
+
     /**
      * 拼装参与缓存的查询条件
      * <p>
@@ -660,6 +856,8 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
                 .append("&category=").append(StrUtil.nullToEmpty(queryRequest.getCategory()))
                 .append("&picFormat=").append(StrUtil.nullToEmpty(queryRequest.getPicFormat()))
                 .append("&userId=").append(queryRequest.getUserId())
+                // 缓存只用于公共空间（spaceId 恒为空），这里列出来是为了条件串与查询语义保持一致
+                .append("&spaceId=").append(queryRequest.getSpaceId())
                 .append("&name=").append(StrUtil.nullToEmpty(queryRequest.getName()))
                 .append("&introduction=").append(StrUtil.nullToEmpty(queryRequest.getIntroduction()))
                 .append("&sortField=").append(StrUtil.nullToEmpty(queryRequest.getSortField()))
@@ -704,17 +902,29 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
      * <p>
      * 顺序上先删库再清对象存储：对象存储清理失败只会留下无引用的文件，
      * 不影响用户看到的结果；反过来先删文件再删库，一旦删库失败就会出现「记录在、图打不开」。
+     * <p>
+     * 删除前做空间校验：公共空间的图片仅上传者本人可删，
+     * 私有空间的图片仅空间创建者（或管理员）可删。
      *
      * @param pictureId 图片 id
+     * @param loginUser 当前登录用户
      */
     @Override
-    public void deletePicture(long pictureId) {
+    public void deletePicture(long pictureId, User loginUser) {
         // 先取出记录，删掉之后就查不到 url 了
         Picture oldPicture = this.getById(pictureId);
         ThrowUtils.throwIf(oldPicture == null, ErrorCode.NOT_FOUND_ERROR, "图片不存在");
+        // 不能删别人空间里的图片
+        PicturePermissionUtils.checkPictureAuth(oldPicture, loginUser, userService, spaceService);
 
         boolean result = this.removeById(pictureId);
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR, "删除失败");
+
+        // 释放空间容量：删掉的图片不再占用该空间
+        if (oldPicture.getSpaceId() != null) {
+            long picSize = oldPicture.getPicSize() == null ? 0L : oldPicture.getPicSize();
+            spaceService.updateSpaceUsage(oldPicture.getSpaceId(), -1L, -picSize);
+        }
 
         // 缓存里的列表还带着这张图，必须清掉
         clearPictureCache();
@@ -759,4 +969,23 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         }
     }
 
+
+    /**
+     * 查询某个空间下的全部图片
+     * <p>
+     * 内部方法，调用方（删除空间等）必须先做空间权限校验，这里不再重复校验。
+     *
+     * @param space 空间，必须带 id
+     * @return 空间下的图片列表
+     */
+    @Override
+    public List<Picture> getListPictureBySpaceId(Space space) {
+        ThrowUtils.throwIf(space == null || space.getId() == null, ErrorCode.PARAMS_ERROR, "空间id不可以为空");
+        return list(lambdaQuery().eq(Picture::getSpaceId, space.getId()));
+    }
+
+    @Override
+    public void deleteBatchIds(List<Long> list) {
+        removeByIds(list);
+    }
 }
