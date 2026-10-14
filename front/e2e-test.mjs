@@ -110,7 +110,11 @@ check(
   !/000$/.test(String(pic.id)),
   `${pic.id}`,
 );
-check('图片 userId 也是字符串且正确', String(pic.userId) === '2109210339268718593', `${pic.userId}`);
+check(
+  '图片 userId 也是 19 位雪花 id 字符串（无精度丢失）',
+  typeof pic.userId === 'string' && /^\d{19}$/.test(String(pic.userId)),
+  `typeof=${typeof pic.userId} value=${pic.userId}`,
+);
 
 const detail = await http(`/picture/get/vo?id=${encodeURIComponent(pic.id)}`);
 check('用列表返回的 id 查详情成功（原来报「请求数据不存在」）', detail.code === 0, `code=${detail.code} message=${detail.message || ''}`);
@@ -118,6 +122,11 @@ check(
   '详情返回的 id 与请求一致',
   !!detail.data && String(detail.data.id) === String(pic.id),
   detail.data ? `${detail.data.id}` : '详情为空',
+);
+check(
+  '详情返回的 userId 与列表一致',
+  !!detail.data && String(detail.data.userId) === String(pic.userId),
+  detail.data ? `${detail.data.userId}` : '详情为空',
 );
 
 /* ============================== 5. 我的图片 ============================== */

@@ -1,245 +1,428 @@
-# 部署指南
+# 云图库 · 私有化图片管理平台
 
-面向「个人图库」这种小体量项目：**一台 2核2G 的轻量云服务器，用 Docker Compose 把 MySQL + 后端 + 前端一起跑起来**。
+![Java](https://img.shields.io/badge/Java-8%20%7C%20JDK%2017-orange)
+![Spring Boot](https://img.shields.io/badge/Spring%20Boot-2.6.13-6db33f)
+![MyBatis-Plus](https://img.shields.io/badge/MyBatis--Plus-3.5.9-2f6fed)
+![MySQL](https://img.shields.io/badge/MySQL-8.0-4479a1)
+![Redis](https://img.shields.io/badge/Redis-7-dc382d)
+![COS](https://img.shields.io/badge/对象存储-腾讯云%20COS-0052d9)
+![Frontend](https://img.shields.io/badge/前端-零依赖%20ES%20Module-success)
+
+把图片传上来、自动压好缩略图、过一遍审核，再按「**公共图库 / 私有空间**」两套模型管理起来。
+
+后端 Spring Boot + MyBatis-Plus + MySQL + Redis + 腾讯云 COS；前端零依赖原生 ES Module（无构建、无第三方运行时依赖）；
+配套 Docker Compose 一套命令部署上线。
+
+| | 说明 |
+| --- | --- |
+| **上传** | 本地文件 / 图片链接 / 关键词批量抓取三条入口，单张超过 900KB 在前端先压缩，后端统一走模板方法落对象存储 |
+| **加速** | 一次上传产出「原图 + webp 缩略图」，列表页用缩略图、详情页用原图；列表查询走 Caffeine → Redis → MySQL 三级读取 |
+| **治理** | 非管理员上传的图片自动进入待审核，管理员审核通过后才出现在公共图库 |
+| **空间** | 公共图库 + 私有空间两级模型，空间按级别（普通/专业/旗舰）限数量与容量，用量随图片增删实时结算 |
+| **权限** | 注解式角色鉴权（AOP）+ 数据级归属校验：图片、空间都只有本人（或空间创建者）与管理员可操作 |
+
+> 详细部署（服务器选型、Docker Compose、Nginx、HTTPS、日常运维）见 [docs/deploy.md](docs/deploy.md)。
+
+<!-- 想放截图时：把图片放到 docs/images/ 下，然后取消下面这段注释即可（在 GitHub 上会渲染成表格）
+
+## 界面预览
+
+| 图片浏览 | 我的空间 | 空间详情 |
+| --- | --- | --- |
+| ![](docs/images/gallery.png) | ![](docs/images/space.png) | ![](docs/images/space-detail.png) |
+
+| 图片管理（管理员） | 上传（本地压缩） | 图片详情 |
+| --- | --- | --- |
+| ![](docs/images/admin-picture.png) | ![](docs/images/upload.png) | ![](docs/images/detail.png) |
+
+-->
 
 ---
 
-## 一、服务器怎么选
+## 目录
 
-### 关键前提：要不要备案
-
-这是最先要决定的，直接影响选哪里的机器：
-
-| | 中国大陆机房 | 香港 / 海外机房 |
-| --- | --- | --- |
-| 域名备案 | **必须**，1~20 个工作日，需实名 | 不需要 |
-| 国内访问速度 | 快（延迟 20~50ms） | 一般（延迟 50~150ms，晚高峰易抖动） |
-| 价格 | 有大量新用户特惠，很便宜 | 略贵 |
-
-- **只有 IP、不用域名**：大陆机房也可以，但 80/443 端口未备案会被拦，得用非标准端口访问。
-- **想用域名 + 图省事**：选香港/海外，免备案，代价是国内访问慢一些。
-- 你是个人项目，如果平时只给自己和少数人看，**香港轻量 + 非标端口** 或 **大陆轻量 + 备案** 都可行。
-
-### 配置建议
-
-这个项目的实际开销：Spring Boot 堆内存约 300~500MB、MySQL 约 300~400MB、Nginx 内存占用极小。
-
-| 配置 | 是否可行 | 说明 |
-| --- | --- | --- |
-| 2核2G | **推荐起步** | 够用。MySQL 需要按 `docker-compose.yml` 里那样限制 buffer pool |
-| 2核1G | 勉强 | 必须加 swap，且 MySQL 要压到 128M buffer pool，容易 OOM |
-| 2核4G | 舒服 | 以后加 Redis、Elasticsearch 也有余量 |
-
-**磁盘**：40GB 起步。注意图片本身放在腾讯云 COS 上，不占服务器磁盘，所以 40GB 只装系统和数据库，够用很久。
-
-### 价格参考（2025 年，新用户特惠）
-
-> 以下数字来自公开的促销文章，**价格波动很大，务必以官网活动页实时价为准**。
-
-**腾讯云轻量应用服务器**（[参考](https://cloud.tencent.cn/developer/article/2581833?policyId=1004)）：
-
-| 配置 | 促销价 |
-| --- | --- |
-| 4核4G3M / 40G SSD / 300G 月流量 | 38 元/年（限时秒杀）/ 79 元/年 |
-| 2核2G3M / 40G SSD / 200G 月流量 | 68 元/年 |
-| 2核2G4M | 99 元/年（**续费同价**） |
-| 2核4G6M / 70G SSD / 600G 月流量 | 528 元/3 年 |
-
-**阿里云轻量应用服务器**（[参考](https://developer.aliyun.com/article/1690936)）：
-
-| 配置 | 促销价 |
-| --- | --- |
-| 轻量 2核2G / 40G ESSD / 峰值 200M | 38 元/年（每天 10 点、15 点抢购），常规 68 元/年 |
-| 经济型 e 2核2G / 40G / 3M | 99 元/年（**续费同价**） |
-| 通用算力型 u1 2核4G / 80G / 5M | 199 元/年（**续费同价**） |
-
-**京东云**：2核4G / 5M / 500G 月流量，约 149 元/年（新人）。
-
-### 三个避坑点
-
-1. **一定选「续费同价」的机型。** 38 元/年那种秒杀款，第二年续费常常涨到 1000+ 元/年。这个坑比首年贵几十块严重得多。
-2. **流量比带宽重要。** 图片走 COS，服务器流量主要是网页和接口，200G/月够个人用。但如果你打算去掉 COS、把图片存服务器本地，流量会涨得很快，要重新算。
-3. **优先选你 COS 所在的那家云、同一个地域。** 你的 COS 在腾讯云广州，那就用腾讯云广州的机器 —— 可以走内网访问，省流量费、延迟也更低。
-
-### 完全免费的方案
-
-**Oracle Cloud 永久免费层**（[官方说明](https://docs.oracle.com/en-us/iaas/Content/FreeTier/freetier_topic-Always_Free_Resources.htm)）配置相当大方：
-
-- ARM（Ampere A1）：**2 OCPU + 12GB 内存**，或拆分最多 2 台
-- AMD 微型实例：最多 2 台，各 1GB 内存
-- 块存储 200GB，出网流量 10TB/月，外加 50GB 的 MySQL HeatWave
-
-对 2核2G 来说这是绰绰有余的。但有几个现实问题：
-
-- 注册需要**国际信用卡**验证（国内双币卡有时能过）
-- 机房在海外（东京/首尔/大阪等），国内访问延迟高
-- **闲置回收**：官方明确写了，7 天内 CPU 95 分位 <20%、网络 <20%、内存 <20% 会被判定为闲置并回收。个人图库访问量低，有被回收的风险
-- 热门区域经常 `out of host capacity`，抢不到实例
-
-适合当练手环境，**不建议把主站放上去**。
-
-其他 PaaS（Railway、Render、Fly.io、Vercel + PlanetScale）也能跑，免费额度通常只有 512MB 内存，Spring Boot 跑起来很勉强，MySQL 免费额度也有行数/容量限制。**个人项目还是自建一台 VPS 最省心。**
+- [功能一览](#功能一览)
+- [技术栈](#技术栈)
+- [系统架构](#系统架构)
+- [目录结构](#目录结构)
+- [核心设计与实现](#核心设计与实现)
+- [工程实践与踩坑记录](#工程实践与踩坑记录)
+- [快速开始](#快速开始)
+- [接口一览](#接口一览)
+- [测试](#测试)
+- [部署](#部署)
+- [后续规划](#后续规划)
 
 ---
 
-## 二、部署步骤
+## 功能一览
 
-前置：服务器装好 Docker 与 Compose（腾讯云/阿里云选 Ubuntu 22.04 镜像，然后 `curl -fsSL https://get.docker.com | sh`）。
+| 模块 | 能力 |
+| --- | --- |
+| 用户 | 注册（MD5 加盐）、登录 / 注销、登录态自动恢复、角色（user / admin）、注解式权限校验 |
+| 图片浏览 | 分页网格、名称/简介关键词搜索（防抖）、分类筛选、按时间/体积排序、详情弹窗（缩略图 → 原图）、查看原图 |
+| 图片上传 | 本地文件（可多选、前端 canvas 压缩）、图片链接导入、关键词批量抓取（必应，单次上限 30 张、自动去重） |
+| 图片管理 | 分页查询、按审核状态筛选、通过 / 拒绝（可改判）、编辑信息（标签数组 ↔ JSON）、重新上传、删除（库 + 缓存 + 对象存储三处一致） |
+| 我的图片 | 自己上传的公共图库图片，带审核状态角标，可编辑 / 重传 / 删除 |
+| 空间 | 创建（级别决定限额）、重命名、删除（连带清理空间内图片）、空间列表带数量与容量进度条 |
+| 空间内图片 | 上传到指定空间（上传前校验数量、拿到真实体积后校验容量）、浏览、编辑、重传、删除，用量实时回填 |
+| 用户管理 | 用户分页、按昵称/角色筛选、新增、编辑、删除（不能删自己） |
+| 前端体验 | hash 路由 + 视图懒加载、统一请求封装（自动解包 BaseResponse、40100 自动跳登录）、Toast / Modal / 分页等通用组件 |
 
-### 1. 把代码传到服务器
+---
 
-```bash
-# 方式一：git（推荐，方便后续更新）
-git clone <你的仓库地址> picture && cd picture
+## 技术栈
 
-# 方式二：本地打包上传（注意排除 target/ 和 .idea/）
-scp -r ./* root@<服务器IP>:/root/picture/
+| 分类 | 选型 |
+| --- | --- |
+| 语言 / 构建 | Java 8 语言级别（构建与运行使用 JDK 17）、Maven 3.8 |
+| 后端框架 | Spring Boot 2.6.13、Spring AOP（自定义 `@AuthCheck`）、Spring Session（HttpSession 登录态） |
+| 持久层 | MyBatis-Plus 3.5.9（含 `mybatis-plus-jsqlparser` 分页插件）、MySQL 8、逻辑删除、雪花 ID |
+| 缓存 | Caffeine 3.1.8（本地一级）+ Redis / Spring Data Redis（分布式二级） |
+| 对象存储 | 腾讯云 COS Java SDK 5.6.227 + 数据万象（上传即产出 webp 压缩图） |
+| 工具库 | Hutool 5.8.26（HTTP / 文件 / 日期）、jsoup 1.15.3（抓取解析）、Lombok |
+| 接口文档 | Knife4j 4.4.0（OpenAPI 2 / Swagger） |
+| 前端 | 原生 HTML + CSS + ES Module，零构建、零第三方运行时依赖；Node 内置模块写的静态服务器 + `/api` 反向代理 |
+| 测试 | JUnit 5.10.2 + Mockito（后端）、自研 Node 冒烟与端到端脚本（前端） |
+| 部署 | Docker 多阶段构建、Docker Compose（MySQL + Redis + 后端 + Nginx 前端）、Nginx 反向代理 |
+
+---
+
+## 系统架构
+
+```
+                     ┌───────────────────────────────┐
+   浏览器  ──────────▶│  Nginx / node server.js       │
+                     │  静态资源 + /api 反向代理      │
+                     └───────────────┬───────────────┘
+                                     │  /api/**
+                     ┌───────────────▼───────────────┐
+                     │  Spring Boot  (context-path)   │
+                     │  Controller → Service → Mapper │
+                     │  AOP 鉴权 / 全局异常 / 参数校验 │
+                     └───┬───────────┬───────────┬───┘
+                         │           │           │
+              ┌──────────▼──┐  ┌─────▼─────┐  ┌──▼──────────────┐
+              │  MySQL 8    │  │  Redis    │  │  腾讯云 COS      │
+              │  业务数据    │  │  列表缓存 │  │  原图 + 缩略图   │
+              └─────────────┘  └───────────┘  └─────────────────┘
+                                     ▲
+                          Caffeine 本地缓存（进程内一级）
 ```
 
-> `application-local.yml` 被 `.gitignore` 排除了，**不会**进仓库 —— 这正是我们想要的，服务器上的密钥走环境变量注入。
+三条主要链路：
 
-### 2. 配置环境变量
+1. **上传**：`Controller` 鉴权 → `Service` 组装入参（校验 / 空间归属 / 配额）→ `PictureUploadTemplate` 模板方法（校验 → 生成 key → 落临时文件 → 上传 COS → 封装结果 → 清理临时文件）→ 写库 → 维护空间用量 → 清缓存。
+2. **列表**：`/picture/list/page/vo`（普通查询）或 `/picture/list/page/vo/cache`（带缓存）→ Caffeine 命中即返回；未命中查 Redis；仍未命中查 MySQL 并回填两级缓存。
+3. **访问图片**：浏览器直接读 COS 地址（**前提：存储桶配置为公共读**，或改用 CDN / 临时签名 URL），后端只负责存储与元数据，不代理图片流量。
 
-```bash
-cd picture
-cp deploy/.env.example deploy/.env
-vi deploy/.env      # 填 MySQL 密码、Redis 密码、腾讯云 COS 五个参数
-chmod 600 deploy/.env   # 里面是明文密钥，收紧权限
+---
+
+## 目录结构
+
+```
+.
+├── src/main/java/com/lsj/demo
+│   ├── controller          # 接口层：user / picture / space / file
+│   │   └── aop             # @AuthCheck 注解式鉴权切面
+│   ├── service             # 业务层接口与实现（含空间配额、缓存、审核逻辑）
+│   ├── manager             # 外部能力封装
+│   │   ├── CosManager      # 对象存储：上传、压缩规则、按 url 反查 key 删除
+│   │   ├── FileManager     # 早期上传实现（已废弃，保留对比）
+│   │   ├── factory         # 上传方式工厂（file / url）
+│   │   └── uplode          # 上传模板与两种实现（本地文件 / URL 下载）
+│   ├── mapper              # MyBatis-Plus Mapper
+│   ├── model
+│   │   ├── entity          # 数据库实体
+│   │   ├── dto             # 请求对象（按模块分包）
+│   │   ├── vo              # 返回对象（统一提供 voToEntity / entityToVo）
+│   │   └── enums           # 空间级别、审核状态、上传方式、用户角色
+│   ├── common              # 统一响应、分页基类、权限工具、全局异常处理
+│   └── exception           # 错误码与业务异常
+├── src/main/resources
+│   ├── application.yml         # 主配置（端口 / 数据源 / multipart）
+│   └── application-local.yml   # 本地密钥（已 gitignore，需自行创建）
+├── src/test/java           # 单元测试 145 项
+├── front/                  # 前端（原生 ES Module，详见 front/README.md）
+│   ├── js/{api,ui,app}.js  # 请求封装 / 通用组件 / 路由入口
+│   ├── js/views/           # 各页面（浏览、我的图片、我的空间、空间详情、管理端）
+│   ├── js/components/      # 上传、详情、编辑弹窗与图片压缩
+│   ├── server.js           # 零依赖静态服务器 + /api 代理
+│   └── smoke-test.mjs      # 模块冒烟检查；e2e-test.mjs 端到端回归
+├── sql/                    # 建表脚本（user / picture / space）
+├── deploy/                 # Dockerfile 之外的部署资产：compose、mysql 初始化、nginx、.env 模板
+├── docs/deploy.md          # 部署指南
+├── Dockerfile              # 后端多阶段构建（Maven 构建 + JRE 运行）
+└── Dockerfile.front        # 前端 Nginx 镜像
 ```
 
-COS 的五个参数抄你本地 `src/main/resources/application-local.yml` 里的值即可。
+---
 
-### 3. 启动
+## 核心设计与实现
 
-```bash
-docker compose --env-file deploy/.env -f deploy/docker-compose.yml up -d --build
+### 1. 图片上传：模板方法 + 两种实现
+
+本地文件与「图片链接导入」的流程只差三步（怎么校验、文件名从哪来、怎么落地成临时文件），其余完全一致。
+因此把流程固化成模板方法 `PictureUploadTemplate.uploadPicture()`（声明为 `final`，子类不可改流程），
+只留三个抽象钩子给子类实现：
+
+```
+validPicture(输入)      → 校验：类型白名单、体积上限（URL 额外做 HEAD 探测）
+getOriginFilename(输入) → 取原始文件名（URL 会忽略 query、处理百分号编码）
+processFile(输入, 文件) → 落地临时文件（本地转存 / 远程下载，边下边校验体积）
 ```
 
-第一次会构建镜像（Maven 要下依赖，慢一些）。起来后看状态：
+骨架统一负责：生成对象存储 key → 建临时文件 → 调子类落地 → 上传 → 解析结果 → **finally 清理临时文件**。
+新增上传方式（比如以后接对象存储直传、多源导入）只需实现这三个方法并注册成 bean，工厂自动发现，不用改主干代码。
+
+### 2. 缩略图：一次上传产出两份，按需压缩
+
+上传时给 COS 数据万象带一条 `imageMogr2/format/webp` 规则，**一次请求同时产出原图与 webp 压缩图**，
+压缩图与原图同目录、只换后缀（`/public/1/xxx.png` → `/public/1/xxx.webp`）。原图本身就是 webp 时跳过压缩，省一次存储与流量。
+前端列表页加载缩略图、详情页加载原图，实测同一张图从 32.5 KB 降到 14.2 KB（省约 56%）。
+
+### 3. 列表性能：Caffeine → Redis → MySQL 三级读取
+
+- 只缓存**与用户身份无关**的公开数据：查询条件被强制为 `reviewStatus = 已通过` 且 `spaceId IS NULL`，因此缓存可以共用同一个 key，不会串号；
+- 缓存 key 由真正影响结果的字段拼装后取 MD5，标签列表先排序再入 key（顺序不同不应产生两份缓存）；
+- Redis TTL = 5 分钟 + 0~5 分钟随机抖动，避免同一时刻批量 key 失效造成缓存雪崩；Caffeine 本地缓存 5 分钟，比 Redis 稍短，两级自然错开；
+- 图片增删改、审核后清理本地缓存；Redis 侧靠 TTL 自然过期（单机部署可接受，多实例部署的处理方式已在代码注释中写明）。
+
+### 4. 图片审核：状态机 + 双端闭环
+
+- 非管理员上传 / 编辑一律打回**待审核**；管理员操作自动过审，审核人与审核时间由后端写入，**前端无法伪造审核参数**；
+- 审核状态变更后立即清缓存，公共图库的可见性随之变化；
+- 管理端支持改判（通过 ↔ 拒绝），拒绝时可带上审核信息。
+
+### 5. 空间模型：公共图库 / 私有空间 + 配额
+
+- `spaceId` 为空表示**公共图库**（所有人可见），不为空表示**私有空间**（仅空间创建者与管理员可见、可操作）；
+- 空间级别（普通版 100 张 / 100MB，专业版 1000 张 / 1GB，旗舰版 10000 张 / 10GB）在建空间时自动填充限额，非管理员只能创建普通版；
+- 上传先校验数量（放不下就不用白跑一趟上传），拿到真实体积后再校验容量，**超限会把刚传上去的文件从对象存储删掉**，不留垃圾；
+- 用量（`totalCount` / `totalSize`）用 SQL 原子自增自减维护（`totalCount = totalCount + (?)`），避免「先查再更新」在并发上传时丢更新；
+- 公共列表查询会**显式追加 `spaceId IS NULL`**：不加这个条件，私有空间里的图片会出现在公共图库中（越权泄漏）。
+
+### 6. 批量抓取
+
+解析必应图片搜索的异步结果片段，优先取结果条目 `m` 属性里的 `murl`（原图直链），
+依次回退到 `murl` / `data-src` / `absUrl(src)`，并处理协议相对地址；同一批内按地址去重、单张失败不影响其余、数量有上限。
+
+### 7. 前端：零依赖的模块化 SPA
+
+- hash 路由 + `import()` 视图懒加载，模块按 `api / ui / components / views` 分层，改完刷新即生效，没有构建步骤；
+- 统一请求封装：自动解包 `BaseResponse`、携带 `credentials: 'include'` 维持登录态、`40100` 自动清理登录态并跳登录页；
+- 上传前用 canvas 压缩（超过 900KB 或 1600px 才压，优先 webp 以保留透明，浏览器不支持时退回 jpeg 并铺白底），压缩后仍超 2MB 本地直接拦下；
+- 所有渲染到页面的用户输入统一走 `escapeHtml`，避免存储型 XSS。
+
+---
+
+## 工程实践与踩坑记录
+
+这些都是真实踩到并修掉的问题，记录在此，也方便后来者少走弯路：
+
+| 问题 | 现象 | 处理 |
+| --- | --- | --- |
+| 雪花 ID 精度丢失 | 19 位主键超过 JS `Number.MAX_SAFE_INTEGER`，前端拿到的 id 被改写，详情接口报「请求数据不存在」、分页 `total` 变 0 | 自定义 Jackson 序列化器：只把超出安全范围的 `Long` 转成字符串，`total`、`size` 等仍保持数字 |
+| 分页 `total` 恒为 0 | MyBatis-Plus 3.5.9 起分页插件被拆到独立模块 | 显式引入 `mybatis-plus-jsqlparser` |
+| 链式 wrapper 报错 | `lambdaQuery()` 的结果直接传给 `list()` / `update()` 时抛 `can not use this method for "getSqlFirst"`（3.5.9 的 `AbstractChainWrapper#getSqlFirst` 是抛异常实现） | 统一改用具体的 `LambdaQueryWrapper` / `LambdaUpdateWrapper` 传给 mapper |
+| 循环依赖启动失败 | `PictureService` ↔ `SpaceService` 互相注入，Boot 2.6+ 默认禁止循环引用 | 用 `@Lazy` 在一侧延迟注入，并在注释里说明原因 |
+| 压缩图跑到桶根目录 | CI 规则的 `fileId` 用 `FileUtil.mainName(key)` 会丢掉目录部分 | 改成完整路径推导，保证压缩图与原图同目录 |
+| 大文件上传必失败 | 只配了 `max-file-size` 没配 `max-request-size`，multipart 解析仍被请求体上限拦下，且报的是笼统的系统错误 | 两个上限都显式配置，并在 e2e 里加了 1 MiB / 1.5 MiB / 3 MiB 边界回归 |
+| 删除对象存储无效 | 删除接口需要的是对象 key，直接把完整 url 传进去不会报错，但什么也没删掉 | 增加 `parseKeyFromUrl` 反推 key，并加「同 url 被多条记录引用则跳过」的保护 |
+| CDN 地址导入被误杀 | 必应缩略图 `/th/id/OIP-C.TTm1he_xxx?w=155` 点号后面是 CDN 加密串，被当作文件后缀判为「文件类型错误」，合法图片传不上去 | 不再凭地址后缀判类型：先看 `Content-Type`，下载后按文件头（JPEG/PNG/WebP magic number）确认并纠正后缀；下载遇 5xx 自动重试一次 |
+| Lombok 与 JDK 21 不兼容 | JDK 21 下编译报 `NoSuchFieldError: JCTree$JCImport.qualid` | 构建统一使用 JDK 17（Docker 构建镜像同样固定 17） |
+
+---
+
+## 快速开始
+
+### 环境要求
+
+| 依赖 | 版本 / 说明 |
+| --- | --- |
+| JDK | **17**（Lombok 1.18.22 与 JDK 21 不兼容；源码语言级别为 Java 8） |
+| Maven | 3.8+ |
+| MySQL | 8.0 |
+| Redis | 7（可选：不启动时不要走带缓存的接口即可） |
+| 腾讯云 COS | 需要一个存储桶，并在控制台开启数据万象图片处理 |
+| Node.js | 18+（只用于启动前端静态服务器，前端本身无构建） |
+
+### 1. 初始化数据库
 
 ```bash
-docker compose --env-file deploy/.env -f deploy/docker-compose.yml ps
-docker compose --env-file deploy/.env -f deploy/docker-compose.yml logs -f app
+mysql -uroot -p < deploy/mysql/init.sql
 ```
 
-看到 `Started DemoApplication` 就成功了，浏览器访问 `http://<服务器IP>/`。
+`deploy/mysql/init.sql` 全部是 `CREATE TABLE IF NOT EXISTS`，可重复执行，建的是 `picture` 库，包含三张表：
+`user`（用户）、`picture`（图片，审核字段与 `spaceId` 直接建在表里）、`space`（空间）。
 
-### 4. 建管理员账号
+### 2. 配置
 
-数据库里的用户密码是 **加盐 MD5**（盐值 `yupi`），不能直接 INSERT 明文。两种方式：
+| 配置 | 位置 | 说明 |
+| --- | --- | --- |
+| 端口 / context-path / multipart 上限 | `application.yml` | 后端 8666，接口前缀 `/api`，单请求与单文件上限均为 10MB |
+| 数据库账号密码 | `application-local.yml` 或环境变量 | `application.yml` 里是 `${MYSQL_USERNAME:root}` / `${MYSQL_PASSWORD:}` 占位符，**仓库中不含任何密码** |
+| 腾讯云 COS 五项参数 | `application-local.yml` 或环境变量 | `cos.client.host / secretId / secretKey / region / bucket` |
+| Redis 连接 | `application-local.yml` | 本地不起 Redis 时，只要不走带缓存的接口即可 |
 
-**方式一（推荐）**：先用前端注册一个普通账号，再用 SQL 改成管理员：
+`src/main/resources/application-local.yml` **已被 `.gitignore` 排除**，本地按下面的结构自建即可（`spring.profiles.active=local` 会自动加载）：
+
+```yaml
+spring:
+  datasource:
+    username: root
+    password: <你的本地数据库密码>
+  redis:
+    database: 3
+    host: 127.0.0.1
+    port: 6379
+cos:
+  client:
+    host: https://your-bucket-appid.cos.ap-guangzhou.myqcloud.com
+    secretId: <你的 SecretId>
+    secretKey: <你的 SecretKey>
+    region: ap-guangzhou
+    bucket: your-bucket-appid
+```
+
+部署时不需要这个文件：`deploy/docker-compose.yml` 通过 `SPRING_DATASOURCE_*`、`COS_CLIENT_*` 等环境变量注入（模板见 `deploy/.env.example`）。
+
+### 3. 启动后端
 
 ```bash
-docker exec -it picture-mysql mysql -uroot -p picture
+mvn clean package -DskipTests
+java -jar target/demo-0.0.1-SNAPSHOT.jar
+# 或开发模式：mvn spring-boot:run
 ```
+
+启动后接口地址为 `http://localhost:8666/api`，接口文档 Knife4j：`http://localhost:8666/api/doc.html`。
+
+### 4. 启动前端
+
+```bash
+cd front
+node server.js        # 打开 http://localhost:8667
+```
+
+`front/server.js` 是零依赖静态服务器，并把 `/api/**` 原样代理到后端，浏览器眼里只有一个源，不存在跨域与 Cookie 问题。
+用其他静态服务器（Live Server 等）打开 `front/` 目录也可以，此时走跨域，需要前后端都用 `localhost` 访问。
+
+### 5. 创建管理员
+
+密码是加盐 MD5（盐值见 `UserServiceImpl`），不能直接写明文。最省事的做法是先在前端注册一个账号，再改角色：
 
 ```sql
 UPDATE user SET userRole = 'admin' WHERE userAccount = '你的账号';
 ```
 
-**方式二**：直接插入算好的哈希。盐值 `yupi` + 明文密码做 MD5：
+---
 
-```sql
-INSERT INTO user (id, userAccount, userPassword, userName, userRole)
-VALUES (1, 'admin', '<yupi+密码 的 MD5>', '管理员', 'admin');
-```
+## 接口一览
 
-### 5. 加域名和 HTTPS（可选）
+统一响应格式：`{ "code": 0, "data": ..., "message": "ok" }`；`code` 与 `ErrorCode` 一一对应（0 成功、40100 未登录、40101 无权限、40300 禁止访问、40400 不存在）。
 
-- 域名解析 A 记录指向服务器 IP
-- 大陆机房要先在云厂商备案系统提交
-- HTTPS 用 Nginx 挂证书，或直接在前面加一层云厂商的免费 SSL
+### 用户
+
+| 方法 | 路径 | 说明 | 权限 |
+| --- | --- | --- | --- |
+| POST | `/user/register` | 注册 | 公开 |
+| POST | `/user/login` | 登录（写入 Session） | 公开 |
+| GET | `/user/get/login` | 获取当前登录用户 | 登录 |
+| POST | `/user/logout` | 注销 | 登录 |
+| GET | `/user/get/vo` | 按 id 获取脱敏用户 | 公开 |
+| POST | `/user/list/page/vo` | 用户分页 | 管理员 |
+| POST | `/user/add`、`/user/update`、`/user/delete`、`GET /user/get` | 用户增删改查 | 管理员 |
+
+### 图片
+
+| 方法 | 路径 | 说明 | 权限 |
+| --- | --- | --- | --- |
+| POST | `/picture/upload` | 上传本地文件（可带 `id` 覆盖、`spaceId` 上传到空间） | 登录 |
+| POST | `/picture/upload/url` | 图片链接导入 | 登录 |
+| POST | `/picture/upload/batch` | 关键词批量抓取 | 管理员 |
+| POST | `/picture/list/page/vo` | 分页查询（`spaceId` 为空查公共图库，不为空查自己的空间） | 公开 / 空间创建者 |
+| POST | `/picture/list/page/vo/cache` | 分页查询（多级缓存，仅公共图库） | 公开 |
+| GET | `/picture/get/vo` | 图片详情（私有空间的图片仅创建者可见） | 公开 / 空间创建者 |
+| POST | `/picture/edit` | 编辑自己的图片 | 本人或管理员 |
+| POST | `/picture/delete` | 删除图片（库 + 缓存 + 对象存储） | 本人或管理员 |
+| POST | `/picture/review` | 审核（通过 / 拒绝） | 管理员 |
+| POST | `/picture/update`、`GET /picture/get`、`POST /picture/list/page` | 管理端增改查 | 管理员 |
+
+### 空间
+
+| 方法 | 路径 | 说明 | 权限 |
+| --- | --- | --- | --- |
+| POST | `/space/add` | 创建空间（普通用户仅普通版） | 登录 |
+| POST | `/space/my/list/page/vo` | 我的空间分页（用户 id 由后端从登录态写入） | 登录 |
+| GET | `/space/get/vo` | 空间详情 | 空间创建者或管理员 |
+| POST | `/space/edit` | 重命名空间 | 空间创建者或管理员 |
+| POST | `/space/delete` | 删除空间（连带删除空间内图片） | 空间创建者或管理员 |
+| GET | `/space/list/level` | 空间级别字典 | 公开 |
+| POST | `/space/list/page`、`/space/list/page/vo`、`GET /space/get`、`POST /space/update` | 管理端 | 管理员 |
+
+### 文件（测试用）
+
+| 方法 | 路径 | 说明 | 权限 |
+| --- | --- | --- | --- |
+| POST | `/file/test/upload` | 上传任意文件到对象存储 | 管理员 |
+| GET | `/file/test/download/` | 从对象存储下载 | 管理员 |
 
 ---
 
-## 三、Redis 与列表缓存
+## 测试
 
-`docker-compose.yml` 里 Redis 已经配好并起了，后端也**已经接上多级缓存**：
-
-```
-Caffeine（本机，5 分钟）→ Redis（分布式，5~10 分钟随机）→ MySQL
-```
-
-接口：`POST /picture/list/page/vo/cache`，只缓存普通用户可见的公开数据（强制 `reviewStatus = 已通过`），所以缓存内容与用户身份无关，可以共用同一个 key。
-
-前端默认**走不带缓存的接口**，由 `front/config.js` 里的开关控制：
-
-```js
-window.__USE_CACHE__ = false;   // 本地没起 Redis 时保持 false
-```
-
-用提供的 Nginx 配置部署时，`sub_filter` 会把它自动改成 `true`（因为服务器上 Redis 是起着的）。**如果你自己不打算跑 Redis，记得把 `deploy/nginx/default.conf` 里那条 `__USE_CACHE__` 的 sub_filter 去掉**，否则首页会请求一个需要 Redis 的接口而加载失败。
-
-本地想试缓存效果：
+### 后端单元测试（145 项）
 
 ```bash
-docker run -d --name redis -p 6379:6379 redis:7-alpine
-# 然后把 front/config.js 里的 __USE_CACHE__ 改成 true
+mvn test
 ```
 
-### 两个已知的缓存行为
+覆盖查询条件构造（排序、筛选、空值）、VO 与实体互转、空间权限规则、图片空间鉴权、
+上传模板（本地文件 / URL / 后缀嗅探 / 下载重试 / 体积与类型校验）、对象存储删除、缓存序列化与 key 稳定性，
+以及一个 `@SpringBootTest` 上下文加载用例（校验 Bean 装配与循环依赖处理）。
 
-1. **Redis 侧没有主动失效**。图片增删改、审核之后，代码会清掉本机 Caffeine（`clearPictureCache()`），但 Redis 里的数据靠 5~10 分钟 TTL 自然过期。单机部署下最多看到几分钟的旧列表，可以接受；**如果以后多实例部署、要求写入后立刻一致**，需要把 `PictureServiceImpl.clearPictureCache()` 里的注释落实 —— 一并删掉 Redis 中 `picture:listVO:` 开头的 key。
-2. **缓存 key 只覆盖公开列表**。因为强制了 `reviewStatus = 已通过`，管理端按状态筛选的请求不会被缓存，也不会互相污染。
+### 前端冒烟与端到端（无需浏览器）
 
-### Redis 后续还能用在哪
+```bash
+cd front
+node smoke-test.mjs                  # 11 个模块真实 import + 首屏与空间页面渲染
+node e2e-test.mjs                    # 49 项真实后端回归
+API_BASE=http://localhost:8688/api node e2e-test.mjs   # 打其他后端地址
+```
 
-- **登录态**：目前用 `HttpSession`（单机内存），以后扩多台必须换成 Redis 存 session
-- **批量抓取限流**：防止有人反复触发抓取
+`smoke-test.mjs` 搭了一个极简 DOM 桩真实加载所有模块，能查出语法、import 路径和首屏渲染阶段的运行时错误；
+`e2e-test.mjs` 覆盖登录与会话、雪花 ID 精度、分页 `total` 自洽、详情接口、上传体积边界，
+以及空间的完整链路（创建 → 列表 → 详情 → 上传到空间并校验用量累加 → 隔离校验 → 删除图片校验用量回落 → 重命名 → 删除）。
 
 ---
 
-## 四、日常运维
+## 部署
+
+推荐用 Docker Compose 在一台 2核2G 的轻量服务器上跑起 MySQL + Redis + 后端 + Nginx 前端：
 
 ```bash
-cd picture
-
-# 更新代码后重新部署
-git pull
-docker compose --env-file deploy/.env -f deploy/docker-compose.yml up -d --build app front
-
-# 看日志
-docker compose --env-file deploy/.env -f deploy/docker-compose.yml logs -f app
-
-# 备份数据库（建议加到 crontab 每天跑）
-docker exec picture-mysql mysqldump -uroot -p$MYSQL_ROOT_PASSWORD picture > backup-$(date +%F).sql
-
-# 只重启后端
-docker compose --env-file deploy/.env -f deploy/docker-compose.yml restart app
+cp deploy/.env.example deploy/.env    # 填数据库密码与 COS 密钥（.env 已被 gitignore）
+docker compose --env-file deploy/.env -f deploy/docker-compose.yml up -d --build
 ```
 
-**注意**：`mysql-data` 卷里的数据是持久化的，但 `deploy/mysql/init.sql` **只在数据卷为空时执行一次**。以后加表/加字段，要手动进容器执行 SQL。
-
-已经准备好的增量脚本：
-
-```bash
-# 给已有库补充缩略图字段（缩略图功能需要）
-docker exec -i picture-mysql mysql -uroot -p picture < deploy/mysql/migration-add-thumbnail.sql
-```
-
-也可以直接进容器手动执行：
-
-```bash
-docker exec -it picture-mysql mysql -uroot -p picture
-```
+服务器选型、备案、Nginx 配置、HTTPS、日常运维与数据备份，见 **[docs/deploy.md](docs/deploy.md)**。
 
 ---
 
-## 五、部署前必须知道的两个改动
+## 后续规划
 
-我修了两个会直接导致部署失败的问题，你拉代码时会一起带上：
+- **AI 图片编辑**：接入多模态模型，支持以文生图、局部重绘、智能扩图，并保留编辑历史可回滚
+- **图库分析**：图片内容自动打标与聚类，输出分类分布、上传趋势、存储占用等可视化报表
+- **团队空间**：空间成员与角色体系（拥有者 / 管理员 / 成员），空间级别的配额分配与操作审计
+- **图片协同编辑**：多人同时编辑图片信息与标签，基于 WebSocket 做实时同步与冲突处理
 
-**1. `pom.xml` 里 `<skip>true</skip>` 导致打不出可执行 jar**
+---
 
-原配置会跳过 `repackage`，`mvn package` 产出的是 **0.1MB、没有 Main-Class、没有内嵌依赖** 的普通 jar，`java -jar` 会直接报错。已移除该配置，现在打出来是 **50MB 的可执行 fat jar**（已验证内嵌 87 个依赖）。
+## 说明
 
-**2. `sql/` 下的建表脚本不能直接用于初始化**
-
-- `create_table_sql.sql` 建的是 `yu_picture` 库，而 `application.yml` 连的是 `picture` 库，**对不上**
-- `create_table_picture.sql` 用 `ALTER TABLE` 追加审核字段，**重复执行会报 Duplicate column**
-- 脚本里写死 `use picture`，容器初始化时容易因库不存在而失败
-
-已统一整理为 [`deploy/mysql/init.sql`](mysql/init.sql)，全部 `CREATE TABLE IF NOT EXISTS`，审核字段直接建在表里，可重复执行。
-
-**另外提醒**：`application.yml` 里的数据库密码是明文 `748374075`，服务器上通过 `SPRING_DATASOURCE_PASSWORD` 覆盖，别把本地密码带到线上。本地那份 yml 建议也改掉。
+- 前端详细说明（页面、接口约定、开发辅助脚本）见 [front/README.md](front/README.md)。
+- 项目起步于编程导航「云图库」教程，其后按自己的需求做了大量重构与扩展：业务上新增空间与配额体系、审核闭环、多级缓存；
+  工程上补齐了单元测试与端到端回归、修正了原实现中的若干缺陷（见[工程实践与踩坑记录](#工程实践与踩坑记录)），并完善了 Docker 部署方案。
+- 仓库中不包含任何密钥：数据库账号密码与 COS 密钥都从 `application-local.yml`（已 gitignore）或环境变量读取，
+  仓库里只有 `${...}` 占位符与 `deploy/.env.example` 模板。
+- 欢迎提 Issue / PR；如果这个项目对你有帮助，点个 Star 就是最大的鼓励。

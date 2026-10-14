@@ -1,10 +1,13 @@
 -- 云图库数据库初始化脚本（可重复执行）
 --
 -- 与 src/main/resources/application.yml 中的库名保持一致：picture
--- 注意原来的两份脚本有几个坑，已在部署时统一到这里：
+-- 覆盖三张表：user（用户）、picture（图片，含审核字段与空间归属）、space（空间）。
+--
+-- 注意原来的几份脚本有几个坑，已在部署时统一到这里：
 --   1. create_table_picture.sql 用 ALTER TABLE 追加审核字段，重复执行会报 Duplicate column；
---   2. 脚本里写死 `use picture`，容器初始化时容易因为库不存在而失败。
--- 这里全部改成 CREATE TABLE IF NOT EXISTS，并把审核字段直接放进建表语句。
+--   2. 脚本里写死 `use picture`，容器初始化时容易因为库不存在而失败；
+--   3. 早期版本漏了 space 表与 picture.spaceId，空间功能会直接报 Unknown column。
+-- 这里全部改成 CREATE TABLE IF NOT EXISTS，并把审核字段、空间字段直接放进建表语句。
 
 CREATE DATABASE IF NOT EXISTS `picture`
     DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
@@ -45,6 +48,7 @@ CREATE TABLE IF NOT EXISTS `picture`
     picScale      double                             NULL COMMENT '图片宽高比例',
     picFormat     varchar(32)                        NULL COMMENT '图片格式',
     userId        bigint                             NOT NULL COMMENT '创建用户 id',
+    spaceId       bigint                             NULL COMMENT '空间 id（为空表示公共空间）',
     reviewStatus  int      DEFAULT 0                 NOT NULL COMMENT '审核状态：0-待审核; 1-通过; 2-拒绝',
     reviewMessage varchar(512)                       NULL COMMENT '审核信息',
     reviewerId    bigint                             NULL COMMENT '审核人 ID',
@@ -58,5 +62,28 @@ CREATE TABLE IF NOT EXISTS `picture`
     INDEX idx_category (category),
     INDEX idx_tags (tags),
     INDEX idx_userId (userId),
+    INDEX idx_spaceId (spaceId),
     INDEX idx_reviewStatus (reviewStatus)
 ) COMMENT '图片' COLLATE = utf8mb4_unicode_ci;
+
+-- 空间表
+-- 说明：私有空间是图片的容器，picture.spaceId 指向这里；
+--     spaceId 为空的图片属于「公共图库」，参与大众审核与展示。
+CREATE TABLE IF NOT EXISTS `space`
+(
+    id         bigint AUTO_INCREMENT COMMENT 'id' PRIMARY KEY,
+    spaceName  varchar(128)                        NULL COMMENT '空间名称',
+    spaceLevel int      DEFAULT 0                  NULL COMMENT '空间级别：0-普通版 1-专业版 2-旗舰版',
+    maxSize    bigint   DEFAULT 0                  NULL COMMENT '空间图片的最大总大小',
+    maxCount   bigint   DEFAULT 0                  NULL COMMENT '空间图片的最大数量',
+    totalSize  bigint   DEFAULT 0                  NULL COMMENT '当前空间下图片的总大小',
+    totalCount bigint   DEFAULT 0                  NULL COMMENT '当前空间下的图片数量',
+    userId     bigint                              NOT NULL COMMENT '创建用户 id',
+    createTime datetime DEFAULT CURRENT_TIMESTAMP  NOT NULL COMMENT '创建时间',
+    editTime   datetime DEFAULT CURRENT_TIMESTAMP  NOT NULL COMMENT '编辑时间',
+    updateTime datetime DEFAULT CURRENT_TIMESTAMP  NOT NULL ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    isDelete   tinyint  DEFAULT 0                  NOT NULL COMMENT '是否删除',
+    INDEX idx_userId (userId),
+    INDEX idx_spaceName (spaceName),
+    INDEX idx_spaceLevel (spaceLevel)
+) COMMENT '空间' COLLATE = utf8mb4_unicode_ci;

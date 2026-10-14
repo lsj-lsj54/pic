@@ -31,8 +31,11 @@ spring:
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
     url: jdbc:mysql://localhost:3306/picture
-    username: root
-    password: 748374075
+    # 账号密码不写死在仓库里：
+    #   - 本地开发放在 application-local.yml（已 gitignore）
+    #   - 部署时用环境变量 SPRING_DATASOURCE_USERNAME / SPRING_DATASOURCE_PASSWORD（见 deploy/docker-compose.yml）
+    username: ${MYSQL_USERNAME:root}
+    password: ${MYSQL_PASSWORD:}
 mybatis-plus:
   configuration:
     map-underscore-to-camel-case: false
