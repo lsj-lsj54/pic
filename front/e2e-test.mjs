@@ -101,8 +101,13 @@ const pic = d1.records[0];
 check('列表返回了图片', !!pic, pic ? `name=${pic.name}` : '');
 check('图片 id 以字符串返回', typeof pic.id === 'string', `typeof=${typeof pic.id} value=${pic.id}`);
 check(
-  '图片 id 与数据库一致',
-  String(pic.id) === '2109567101075230721',
+  '图片 id 是 19 位雪花 id 字符串（数字形式会丢精度）',
+  /^\d{19}$/.test(String(pic.id)),
+  `${pic.id}`,
+);
+check(
+  '图片 id 未被 JS 精度改写成 ...000 结尾',
+  !/000$/.test(String(pic.id)),
   `${pic.id}`,
 );
 check('图片 userId 也是字符串且正确', String(pic.userId) === '2109210339268718593', `${pic.userId}`);
@@ -203,6 +208,123 @@ for (const [label, size] of boundaryCases) {
     `code=${r.code} message=${r.message}`,
   );
 }
+
+/* ============================== 9. 空间 ============================== */
+console.log('\n[9] 空间：级别字典 / 创建 / 查询 / 重命名 / 删除');
+const levelList = await http('/space/list/level');
+check(
+  '空间级别字典返回 3 个级别',
+  levelList.code === 0 && Array.isArray(levelList.data) && levelList.data.length === 3,
+  `code=${levelList.code} len=${levelList.data && levelList.data.length}`,
+);
+
+// 用时间戳命名，避免重复执行时撞上「用户空间已经存在」
+const spaceName = `e2e空间-${Date.now()}`;
+const created = await http('/space/add', {
+  method: 'POST',
+  body: { spaceName, spaceLevel: 0 },
+});
+check('创建空间成功', created.code === 0, `code=${created.code} message=${created.message || ''}`);
+const spaceId = created.data;
+check('返回了新空间 id', !!spaceId, `spaceId=${spaceId}`);
+
+const mySpaces = await http('/space/my/list/page/vo', {
+  method: 'POST',
+  body: { current: 1, pageSize: 10, sortField: 'createTime', sortOrder: 'descend' },
+});
+check('我的空间列表请求成功', mySpaces.code === 0, `code=${mySpaces.code}`);
+const mineSpace = (mySpaces.data.records || [])
+  .find((item) => String(item.id) === String(spaceId));
+check('列表里能找到刚创建的空间', !!mineSpace);
+check(
+  '空间限额已按级别自动填充',
+  !!mineSpace && Number(mineSpace.maxCount) > 0 && Number(mineSpace.maxSize) > 0,
+  mineSpace ? `maxCount=${mineSpace.maxCount} maxSize=${mineSpace.maxSize}` : '',
+);
+check(
+  '空间归当前登录用户所有',
+  !!mineSpace && String(mineSpace.userId) === String(myId),
+  mineSpace ? `userId=${mineSpace.userId}` : '',
+);
+
+const spaceVO = await http(`/space/get/vo?id=${encodeURIComponent(spaceId)}`);
+check(
+  '按 id 查询空间成功',
+  spaceVO.code === 0 && String(spaceVO.data.id) === String(spaceId),
+  `code=${spaceVO.code}`,
+);
+
+const spacePictures = await http('/picture/list/page/vo', {
+  method: 'POST',
+  body: { current: 1, pageSize: 10, spaceId },
+});
+check(
+  '查询空间内的图片成功（新空间应为空）',
+  spacePictures.code === 0 && spacePictures.data.total === 0,
+  `code=${spacePictures.code} total=${spacePictures.data && spacePictures.data.total}`,
+);
+
+/* 上传到空间：同时回归「空间用量随图片增删变化」这条链路。
+   updateSpaceUsage 依赖 MyBatis-Plus 的 wrapper 能力，用链式 wrapper 会在运行时报
+   「can not use this method for getSqlFirst」，只有真连数据库才暴露得出来。 */
+const uploadSource = pic.url;
+const uploaded = await http('/picture/upload/url', {
+  method: 'POST',
+  body: { pictureUrl: uploadSource, spaceId },
+});
+check('上传图片到空间成功', uploaded.code === 0, `code=${uploaded.code} message=${uploaded.message || ''}`);
+const uploadedPic = uploaded.data || {};
+check('图片归属到了目标空间', String(uploadedPic.spaceId) === String(spaceId), `spaceId=${uploadedPic.spaceId}`);
+
+const spaceAfterUpload = await http(`/space/get/vo?id=${encodeURIComponent(spaceId)}`);
+check(
+  '空间图片数量 +1',
+  Number(spaceAfterUpload.data.totalCount) === 1,
+  `totalCount=${spaceAfterUpload.data.totalCount}`,
+);
+check(
+  '空间已用容量等于图片体积',
+  Number(spaceAfterUpload.data.totalSize) === Number(uploadedPic.picSize),
+  `totalSize=${spaceAfterUpload.data.totalSize} picSize=${uploadedPic.picSize}`,
+);
+check(
+  '空间里的图片不会出现在公共图库',
+  !((await http('/picture/list/page/vo', {
+    method: 'POST',
+    body: { current: 1, pageSize: 20, sortField: 'createTime', sortOrder: 'descend' },
+  })).data.records || []).some((item) => String(item.id) === String(uploadedPic.id)),
+);
+
+const deletedPicture = await http('/picture/delete', { method: 'POST', body: { id: uploadedPic.id } });
+check('删除空间内图片成功', deletedPicture.code === 0, `code=${deletedPicture.code} message=${deletedPicture.message || ''}`);
+const spaceAfterDelete = await http(`/space/get/vo?id=${encodeURIComponent(spaceId)}`);
+check(
+  '删除图片后空间用量回落',
+  Number(spaceAfterDelete.data.totalCount) === 0 && Number(spaceAfterDelete.data.totalSize) === 0,
+  `totalCount=${spaceAfterDelete.data.totalCount} totalSize=${spaceAfterDelete.data.totalSize}`,
+);
+
+const renamed = await http('/space/edit', {
+  method: 'POST',
+  body: { id: spaceId, spaceName: `${spaceName}-已改名` },
+});
+check('重命名空间成功', renamed.code === 0, `code=${renamed.code} message=${renamed.message || ''}`);
+
+const renameCheck = await http(`/space/get/vo?id=${encodeURIComponent(spaceId)}`);
+check(
+  '重命名已生效',
+  renameCheck.code === 0 && renameCheck.data.spaceName === `${spaceName}-已改名`,
+  renameCheck.data ? `spaceName=${renameCheck.data.spaceName}` : '',
+);
+
+const deleted = await http('/space/delete', { method: 'POST', body: { id: spaceId } });
+check('删除空间成功', deleted.code === 0, `code=${deleted.code} message=${deleted.message || ''}`);
+const afterDelete = await http(`/space/get/vo?id=${encodeURIComponent(spaceId)}`);
+check(
+  '删除后查空间返回「数据不存在」',
+  afterDelete.code === 40400,
+  `code=${afterDelete.code} message=${afterDelete.message || ''}`,
+);
 
 /* ============================== 汇总 ============================== */
 console.log(`\n================ 通过 ${pass} 项，失败 ${fail} 项 ================`);

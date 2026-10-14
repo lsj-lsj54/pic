@@ -9,6 +9,8 @@ const routes = [
   { path: '/', view: () => import('./views/gallery.js') },
   { path: '/login', view: () => import('./views/auth.js'), layout: 'blank' },
   { path: '/mine', view: () => import('./views/mine.js'), auth: true },
+  { path: '/space', view: () => import('./views/space.js'), auth: true },
+  { path: '/space/detail', view: () => import('./views/spaceDetail.js'), auth: true },
   { path: '/admin/picture', view: () => import('./views/adminPicture.js'), admin: true },
   { path: '/admin/user', view: () => import('./views/adminUser.js'), admin: true },
 ];
@@ -69,6 +71,7 @@ function renderShell(layout) {
         <nav class="nav">
           <a href="#/" data-nav="/">图片浏览</a>
           <a href="#/mine" data-nav="/mine">我的图片</a>
+          <a href="#/space" data-nav="/space">我的空间</a>
           ${adminNav}
         </nav>
         <div class="user-area">
@@ -89,7 +92,10 @@ function renderShell(layout) {
 function bindShellEvents() {
   const { path } = parseHash();
   $$('[data-nav]').forEach((link) => {
-    link.classList.toggle('active', link.dataset.nav === path);
+    const target = link.dataset.nav;
+    // 详情页也要让「我的空间」保持高亮，所以子路径用前缀匹配
+    const active = target === '/' ? path === '/' : path.startsWith(target);
+    link.classList.toggle('active', active);
   });
 
   const loginBtn = $('#login-btn');

@@ -6,7 +6,9 @@ import cn.hutool.core.lang.TypeReference;
 import cn.hutool.core.util.*;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.conditions.query.LambdaQueryChainWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
@@ -974,6 +976,11 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
      * 查询某个空间下的全部图片
      * <p>
      * 内部方法，调用方（删除空间等）必须先做空间权限校验，这里不再重复校验。
+     * <p>
+     * 注意：这里必须用 {@link LambdaQueryWrapper} 而不是把 lambdaQuery() 的结果直接传给 list()。
+     * MyBatis-Plus 3.5.9 拼 SQL 时会取 wrapper 的 sqlFirst，而链式 wrapper
+     * （AbstractChainWrapper）的 getSqlFirst 直接抛异常，传进去会报
+     * 「can not use this method for "getSqlFirst"」。
      *
      * @param space 空间，必须带 id
      * @return 空间下的图片列表
@@ -981,7 +988,9 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
     @Override
     public List<Picture> getListPictureBySpaceId(Space space) {
         ThrowUtils.throwIf(space == null || space.getId() == null, ErrorCode.PARAMS_ERROR, "空间id不可以为空");
-        return list(lambdaQuery().eq(Picture::getSpaceId, space.getId()));
+        LambdaQueryWrapper<Picture> queryWrapper = Wrappers.lambdaQuery(Picture.class)
+                .eq(Picture::getSpaceId, space.getId());
+        return list(queryWrapper);
     }
 
     @Override

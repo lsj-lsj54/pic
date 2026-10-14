@@ -138,14 +138,19 @@ export function compressImage(file) {
  *
  * @param {object}   options
  * @param {string}   [options.pictureId] 图片 id，传了表示覆盖上传
+ * @param {string}   [options.spaceId]   空间 id，传了表示上传到该私有空间
+ * @param {string}   [options.spaceName] 空间名称，仅用于弹窗里的提示文案
  * @param {Function} [options.onSuccess] 上传成功回调
  */
-export function openUploadModal({ pictureId, onSuccess } = {}) {
+export function openUploadModal({
+  pictureId, spaceId, spaceName, onSuccess,
+} = {}) {
   const isOverwrite = !!pictureId;
   const modal = showModal({
     title: isOverwrite ? '重新上传图片' : '上传图片',
     width: '640px',
     content: `
+      ${spaceId ? `<p class="upload-space-tip">将上传到空间「${escapeHtml(spaceName || spaceId)}」</p>` : ''}
       <div class="tabs" id="upload-tabs">
         <button class="tab active" data-tab="file" type="button">本地文件</button>
         <button class="tab" data-tab="url" type="button">图片链接</button>
@@ -354,7 +359,7 @@ export function openUploadModal({ pictureId, onSuccess } = {}) {
       startBtn.textContent = '上传中…';
       setUrlHint('正在下载并上传，请稍候…');
       try {
-        await pictureApi.uploadByUrl(pictureUrl, pictureId);
+        await pictureApi.uploadByUrl(pictureUrl, pictureId, spaceId);
         toast('上传成功', 'success');
         if (typeof onSuccess === 'function') {
           onSuccess();
@@ -381,7 +386,7 @@ export function openUploadModal({ pictureId, onSuccess } = {}) {
       task.statusText = '上传中…';
       renderList();
       try {
-        await pictureApi.upload(task.file, pictureId);
+        await pictureApi.upload(task.file, pictureId, spaceId);
         task.status = 'done';
         task.statusText = '已完成';
         success += 1;
@@ -496,6 +501,9 @@ export async function openPictureDetail(id, { onChanged } = {}) {
             （列表页加载的资源大小）</p></div>
           <div class="detail-row"><span>上传者</span><p>${escapeHtml(picture.user
     ? picture.user.userName || picture.user.userAccount : '-')}</p></div>
+          <div class="detail-row"><span>所属空间</span><p>${picture.spaceId
+    ? `私有空间（<a href="#/space/detail?id=${encodeURIComponent(picture.spaceId)}">去空间查看</a>）`
+    : '公共图库'}</p></div>
           <div class="detail-row"><span>上传时间</span><p>${formatTime(picture.createTime)}</p></div>
           <div class="detail-actions">
             <a class="btn btn-sm" href="${escapeHtml(originUrl(picture))}" target="_blank" rel="noopener">查看原图</a>
@@ -519,6 +527,8 @@ export async function openPictureDetail(id, { onChanged } = {}) {
       closeModal();
       openUploadModal({
         pictureId: picture.id,
+        // 带上原空间：覆盖上传后图片仍归属原来的空间
+        spaceId: picture.spaceId,
         onSuccess: onChanged,
       });
     });

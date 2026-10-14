@@ -110,6 +110,8 @@ const modules = [
   './js/views/auth.js',
   './js/views/gallery.js',
   './js/views/mine.js',
+  './js/views/space.js',
+  './js/views/spaceDetail.js',
   './js/views/adminPicture.js',
   './js/views/adminUser.js',
 ];
@@ -136,11 +138,86 @@ if (shell) {
     failed += 1;
     console.log('FAIL 骨架中缺少 #view 容器');
   }
+  if (!shell.includes('我的空间')) {
+    failed += 1;
+    console.log('FAIL 导航里缺少「我的空间」入口');
+  }
 } else {
   failed += 1;
   console.log('FAIL 未渲染出页面骨架，最后一段输出：');
   console.log(renderedHtml.slice(-1)[0]);
 }
+
+/* ------------------------------ 空间页面渲染检查 ------------------------------ */
+
+/** 让 fetch 返回「已登录 + 有一个空间」，用于验证空间页面的渲染分支 */
+function installSpaceFetchStub() {
+  const spaceSample = {
+    id: '10',
+    spaceName: '旅行照片',
+    spaceLevel: 0,
+    maxSize: 104857600,
+    maxCount: 100,
+    totalSize: 2048,
+    totalCount: 2,
+    userId: '1',
+    createTime: '2026-10-14 10:00:00',
+  };
+  globalThis.fetch = async (url) => {
+    const target = String(url);
+    let result = { code: 40100, data: null, message: '未登录' };
+    if (target.includes('/space/my/list/page/vo')) {
+      result = { code: 0, data: { current: 1, size: 12, total: 1, records: [spaceSample] } };
+    } else if (target.includes('/space/get/vo')) {
+      result = { code: 0, data: spaceSample };
+    } else if (target.includes('/picture/list/page/vo')) {
+      result = { code: 0, data: { current: 1, size: 12, total: 0, records: [] } };
+    }
+    return {
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify(result),
+    };
+  };
+}
+
+/** 等待视图内部的异步加载完成 */
+const tick = () => new Promise((resolve) => setTimeout(resolve, 50));
+
+/** 断言最近渲染出来的 HTML 里包含某段内容 */
+function expectRendered(label, ...keywords) {
+  const html = renderedHtml.join('\n');
+  const missing = keywords.filter((word) => !html.includes(word));
+  if (missing.length === 0) {
+    console.log(`OK   ${label}`);
+    return;
+  }
+  failed += 1;
+  console.log(`FAIL ${label}（缺少：${missing.join('、')}）`);
+}
+
+installSpaceFetchStub();
+const { state } = await import('./js/ui.js');
+state.setCurrentUser({
+  id: '1', userAccount: 'tester', userName: '测试用户', userRole: 'user',
+});
+
+const spaceView = (await import('./js/views/space.js')).default;
+renderedHtml.length = 0;
+spaceView.render(createElementStub('div'));
+await tick();
+expectRendered('我的空间页渲染出空间卡片与用量条', 'space-card', '旅行照片', 'usage-fill', '创建空间');
+
+const spaceDetailView = (await import('./js/views/spaceDetail.js')).default;
+renderedHtml.length = 0;
+spaceDetailView.render(createElementStub('div'), { id: '10' });
+await tick();
+expectRendered('空间详情页渲染出空间信息与上传入口', 'space-detail-head', '旅行照片', '上传图片');
+
+renderedHtml.length = 0;
+spaceDetailView.render(createElementStub('div'), {});
+await tick();
+expectRendered('空间详情页缺少 id 时给出提示', '缺少空间 id');
 
 console.log(`\n共检查 ${modules.length} 个模块，失败 ${failed} 项`);
 process.exit(failed === 0 ? 0 : 1);

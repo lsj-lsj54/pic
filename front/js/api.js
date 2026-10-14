@@ -152,13 +152,17 @@ export const pictureApi = {
    *
    * @param {File}   file    图片文件
    * @param {string} [id]    图片 id，传了表示覆盖已有图片
+   * @param {string} [spaceId] 空间 id，传了表示上传到该私有空间
    */
-  upload: (file, id) => {
+  upload: (file, id, spaceId) => {
     const formData = new FormData();
     formData.append('file', file);
     if (id !== undefined && id !== null && id !== '') {
       // 后端 PictureUploadRequest.id 是 Long，表单字段用字符串即可绑定
       formData.append('id', String(id));
+    }
+    if (spaceId !== undefined && spaceId !== null && spaceId !== '') {
+      formData.append('spaceId', String(spaceId));
     }
     return request('/picture/upload', { method: 'POST', body: formData });
   },
@@ -167,11 +171,15 @@ export const pictureApi = {
    *
    * @param {string}      pictureUrl 图片地址
    * @param {string}      [id]       图片 id，传了表示覆盖已有图片
+   * @param {string}      [spaceId]  空间 id，传了表示上传到该私有空间
    */
-  uploadByUrl: (pictureUrl, id) => {
+  uploadByUrl: (pictureUrl, id, spaceId) => {
     const body = { pictureUrl };
     if (id !== undefined && id !== null && id !== '') {
       body.id = String(id);
+    }
+    if (spaceId !== undefined && spaceId !== null && spaceId !== '') {
+      body.spaceId = String(spaceId);
     }
     return request('/picture/upload/url', { method: 'POST', body });
   },
@@ -207,6 +215,46 @@ export const pictureApi = {
   }),
   /** 图片审核（仅管理员） */
   review: (data) => request('/picture/review', { method: 'POST', body: data }),
+};
+
+/* ------------------------------ 空间模块 ------------------------------ */
+
+/**
+ * 空间接口
+ * <p>
+ * 规则与后端一致：空间只有创建者（或管理员）能查看和修改；
+ * `spaceId` 为空表示公共空间，不为空表示对应的私有空间。
+ */
+export const spaceApi = {
+  /** 创建空间，返回新空间 id（普通用户只能创建普通版） */
+  add: (data) => request('/space/add', { method: 'POST', body: data }),
+  /** 编辑空间名称（创建者或管理员） */
+  edit: (data) => request('/space/edit', { method: 'POST', body: data }),
+  /** 更新空间（仅管理员，可改级别与限额） */
+  update: (data) => request('/space/update', { method: 'POST', body: data }),
+  /** 删除空间（创建者或管理员），空间内的图片会一并删除 */
+  delete: (id) => request('/space/delete', { method: 'POST', body: { id } }),
+  /** 根据 id 获取空间实体（仅管理员） */
+  getById: (id) => request(`/space/get?id=${encodeURIComponent(id)}`),
+  /** 根据 id 获取空间封装类（创建者或管理员） */
+  getVOById: (id) => request(`/space/get/vo?id=${encodeURIComponent(id)}`),
+  /** 分页获取空间实体列表（仅管理员） */
+  listByPage: (query) => request('/space/list/page', {
+    method: 'POST',
+    body: cleanParams(query),
+  }),
+  /** 分页获取空间封装列表（仅管理员） */
+  listVOByPage: (query) => request('/space/list/page/vo', {
+    method: 'POST',
+    body: cleanParams(query),
+  }),
+  /** 分页获取当前用户自己的空间列表（用户 id 由后端从登录态写入） */
+  myListVOByPage: (query) => request('/space/my/list/page/vo', {
+    method: 'POST',
+    body: cleanParams(query),
+  }),
+  /** 空间级别字典：text / value / maxSize / maxCount */
+  listLevel: () => request('/space/list/level'),
 };
 
 /* ------------------------------ 文件模块 ------------------------------ */

@@ -143,7 +143,7 @@ export default {
           <h2 class="page-title">我的图片</h2>
           <span class="page-sub">当前账号：${escapeHtml(
     state.getCurrentUser().userName || state.getCurrentUser().userAccount,
-  )}</span>
+  )}（这里只显示公共图库的图片，空间里的图片在「我的空间」）</span>
         </div>
         <div class="toolbar-right">
           <button class="btn btn-primary" id="upload-btn" type="button">上传图片</button>

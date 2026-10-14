@@ -1011,6 +1011,135 @@ h1, h2, h3 {
   }
 }
 
+/* ------------------------------ 空间 ------------------------------ */
+
+.space-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 16px;
+}
+
+.space-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.space-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-lg);
+}
+
+.space-card-head,
+.space-detail-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.space-name {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.space-card-meta {
+  color: var(--text-sub);
+  font-size: 12px;
+}
+
+.space-info {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 240px;
+  max-width: 340px;
+}
+
+.space-info .page-title {
+  font-size: 18px;
+}
+
+/* 用量条 */
+.usage {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.usage-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--text-sub);
+}
+
+.usage-row b {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.usage-track {
+  height: 6px;
+  border-radius: 999px;
+  background: #eef0f4;
+  overflow: hidden;
+}
+
+.usage-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--primary);
+  transition: width 0.3s ease;
+}
+
+.usage-fill.usage-full {
+  background: var(--danger);
+}
+
+/* 空间级别标签 */
+.tag-common {
+  background: #eef3fe;
+  color: var(--primary);
+}
+
+.tag-pro {
+  background: #efe9fe;
+  color: #6d3ff0;
+}
+
+.tag-flagship {
+  background: #fdf1dc;
+  color: #b45309;
+}
+
+/* 上传弹窗里的空间提示 */
+.upload-space-tip {
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  background: #eef3fe;
+  color: var(--primary);
+  font-size: 13px;
+}
+
+.page-actions {
+  display: flex;
+  justify-content: center;
+  margin-top: 12px;
+}
+
 /* ------------------------------ 响应式 ------------------------------ */
 
 @media (max-width: 720px) {
@@ -1031,6 +1160,15 @@ h1, h2, h3 {
 
   .grid {
     grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  }
+
+  .space-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .space-info {
+    min-width: 0;
+    max-width: none;
   }
 
   .card-img {

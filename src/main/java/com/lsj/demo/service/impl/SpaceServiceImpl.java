@@ -4,6 +4,8 @@ import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.util.ObjUtil;
 import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 
@@ -252,12 +254,14 @@ public class SpaceServiceImpl extends ServiceImpl<SpaceMapper, Space>
         if (spaceId == null || (countDelta == 0 && sizeDelta == 0)) {
             return;
         }
-        // 用 SQL 自增/自减，避免「先查询再更新」在并发上传时相互覆盖
-        boolean updated = this.lambdaUpdate()
+        // 用 SQL 自增/自减，避免「先查询再更新」在并发上传时相互覆盖。
+        // 这里用 LambdaUpdateWrapper 而不是 lambdaUpdate()：链式 wrapper 的 getSqlFirst 会抛异常，
+        // MyBatis-Plus 3.5.9 拼 SQL 时必须能取到它。
+        LambdaUpdateWrapper<Space> updateWrapper = Wrappers.lambdaUpdate(Space.class)
                 .eq(Space::getId, spaceId)
                 .setSql(countDelta != 0, "totalCount = totalCount + (" + countDelta + ")")
-                .setSql(sizeDelta != 0, "totalSize = totalSize + (" + sizeDelta + ")")
-                .update();
+                .setSql(sizeDelta != 0, "totalSize = totalSize + (" + sizeDelta + ")");
+        boolean updated = this.update(updateWrapper);
         if (!updated) {
             // 空间可能已被删除，属于可接受情况，不影响图片本身的增删
             log.warn("空间容量更新失败，空间可能已被删除，spaceId = {}", spaceId);

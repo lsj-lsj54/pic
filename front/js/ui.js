@@ -60,6 +60,23 @@ export const REVIEW_STATUS = {
 /** 图片分类 */
 export const CATEGORY_OPTIONS = ['风景', '人物', '动物', '动漫', '表情包', '背景', '其他'];
 
+/** 空间级别：0-普通版 1-专业版 2-旗舰版（与后端 SpaceLevelEnum 一致） */
+export const SPACE_LEVEL = {
+  0: { text: '普通版', cls: 'tag-common' },
+  1: { text: '专业版', cls: 'tag-pro' },
+  2: { text: '旗舰版', cls: 'tag-flagship' },
+};
+
+/**
+ * 取空间级别的展示信息
+ *
+ * @param {number} level 级别值
+ * @returns {{text: string, cls: string}} 级别文案与样式类
+ */
+export function spaceLevelInfo(level) {
+  return SPACE_LEVEL[level] || { text: '未知级别', cls: 'tag-pending' };
+}
+
 /* ------------------------------ 轻提示 ------------------------------ */
 
 let toastTimer = null;
@@ -281,4 +298,70 @@ export function renderPager({ current, pageSize, total }) {
 /** 空状态 */
 export function renderEmpty(text = '暂无数据') {
   return `<div class="empty">${escapeHtml(text)}</div>`;
+}
+
+/* ------------------------------ 空间 ------------------------------ */
+
+/**
+ * 使用率百分比
+ *
+ * @param {number} used 已用量
+ * @param {number} max  上限
+ * @returns {number} 0 ~ 100 的整数，上限缺失时返回 0
+ */
+export function usagePercent(used, max) {
+  const total = Number(max);
+  const current = Number(used) || 0;
+  if (!Number.isFinite(total) || total <= 0) {
+    return 0;
+  }
+  return Math.min(100, Math.round((current / total) * 100));
+}
+
+/**
+ * 空间用量条（图片数量 + 已用容量）
+ * <p>
+ * 用量超过 90% 时进度条变红，提示用户该清理或升级空间了。
+ *
+ * @param {object} space 空间对象
+ * @returns {string} HTML 片段
+ */
+export function renderSpaceUsage(space) {
+  const countPercent = usagePercent(space.totalCount, space.maxCount);
+  const sizePercent = usagePercent(space.totalSize, space.maxSize);
+  return `
+    <div class="usage">
+      <div class="usage-row">
+        <span>图片数量</span>
+        <b>${Number(space.totalCount) || 0} / ${Number(space.maxCount) || 0}</b>
+      </div>
+      <div class="usage-track">
+        <i class="usage-fill${countPercent >= 90 ? ' usage-full' : ''}" style="width:${countPercent}%"></i>
+      </div>
+      <div class="usage-row">
+        <span>已用容量</span>
+        <b>${formatSize(space.totalSize)} / ${formatSize(space.maxSize)}</b>
+      </div>
+      <div class="usage-track">
+        <i class="usage-fill${sizePercent >= 90 ? ' usage-full' : ''}" style="width:${sizePercent}%"></i>
+      </div>
+    </div>`;
+}
+
+/**
+ * 空间级别下拉选项
+ *
+ * @param {number}  selected    当前选中值
+ * @param {boolean} onlyCommon  是否只允许普通版（非管理员）
+ * @returns {string} option 列表 HTML
+ */
+export function spaceLevelOptions(selected, onlyCommon = false) {
+  return Object.keys(SPACE_LEVEL)
+    .map(Number)
+    .filter((level) => !onlyCommon || level === 0)
+    .map((level) => {
+      const item = SPACE_LEVEL[level];
+      return `<option value="${level}" ${level === Number(selected) ? 'selected' : ''}>${item.text}</option>`;
+    })
+    .join('');
 }
