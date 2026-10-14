@@ -102,6 +102,10 @@ export const API_BASE = 'http://localhost:8666/api';
 
 - **单文件最大 2MB**：后端 `FileManager.validPicture` 的限制。前端会把超过 900KB 或 1600px 的图片在本地压到 900KB 以内（优先 webp 以保留透明，浏览器不支持时退回 jpeg 并铺白底），压缩后仍超 2MB 的会在本地直接拦下，不浪费一次请求。
 - **格式限制**：仅 `jpg / jpeg / png / webp`，与后端白名单一致。
+- **URL 导入按内容识别格式**：地址里没有真实图片后缀也能传。例如必应缩略图
+  `https://tse2-mm.cn.bing.net/th/id/OIP-C.TTm1he_xxx?w=155&h=180`，点号后面那串是 CDN 的加密串、根本不是后缀。
+  后端不再凭地址后缀判断类型（早年会把这类合法图片判成「文件类型错误」），而是先看响应 `Content-Type`、
+  再按文件头确认，并把入库的文件后缀改成真实格式（webp / png / jpg）；下载遇到 CDN 偶发 5xx 会自动重试一次。
 - **分页上限**：首页与我的图片每页 12 条、管理页每页 10 条，均未超过后端「size ≤ 20」的爬虫限制。
 - **登录态**：靠 `JSESSIONID`，所有请求都带 `credentials: 'include'`；接口返回 `40100` 时会自动清理登录态并跳登录页。
 - **审核参数不可伪造**：管理员保存图片时走 `/picture/update`，普通用户走 `/picture/edit`，审核状态一律由后端 `fillReviewParams` 决定。

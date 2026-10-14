@@ -86,19 +86,22 @@ public abstract class PictureUploadTemplate {
             // 4. 把输入源落到临时文件（本地文件直接转存，URL 则下载）
             processFile(inputSource, file);
 
+            // 4.1 按真实文件内容修正上传路径（URL 上传的地址里常常没有可信的后缀）
+            String realUploadPath = resolveUploadPath(file, uploadPath);
+
             // 5. 上传到对象存储（同时产出原图与压缩图）
-            PutObjectResult putObjectResult = cosManager.putPictureObject(uploadPath, file);
-            ImageInfo imageInfo = getImageInfo(putObjectResult, file, uploadPath);
+            PutObjectResult putObjectResult = cosManager.putPictureObject(realUploadPath, file);
+            ImageInfo imageInfo = getImageInfo(putObjectResult, file, realUploadPath);
 
             // 6. 取出压缩图信息。压缩是可选的：
             //    原图已经是 webp 时不会生成压缩图，此时退回用原图信息
             CIObject compressedCiObject = getCompressedObject(putObjectResult);
             if (compressedCiObject != null) {
                 // 尺寸、体积用压缩图的，列表页展示的就是它
-                return buildResult(originFilename, uploadPath, compressedCiObject);
+                return buildResult(originFilename, realUploadPath, compressedCiObject);
             }
             // 没有压缩图：url 与 thumbnailUrl 都指向原图
-            return buildResult(originFilename, file, uploadPath, imageInfo);
+            return buildResult(originFilename, file, realUploadPath, imageInfo);
         } catch (BusinessException e) {
             // 业务异常原样抛出，避免被包装成笼统的「上传失败」
             throw e;
@@ -185,6 +188,23 @@ public abstract class PictureUploadTemplate {
      * @param inputSource 输入源
      */
     protected abstract void validPicture(Object inputSource);
+
+    /**
+     * 按真实文件内容修正上传路径（默认原样返回）
+     * <p>
+     * 本地文件上传的后缀来自用户选择的文件名，基本可信；
+     * URL 上传则经常遇到「后缀不是真后缀」的地址，例如必应缩略图
+     * {@code /th/id/OIP-C.TTm1he_rRDKZz4SCHovBpQHaHa?w=155}，
+     * 点号后面的那一串是 CDN 的加密串，照着它拼出来的对象存储 key 后缀是错的，
+     * 需要下载完按文件头判断真实格式（见 {@link UrlPictureUpload}）。
+     *
+     * @param file       已落地的临时文件
+     * @param uploadPath 依据文件名 / URL 算出的上传路径
+     * @return 最终使用的上传路径，默认不改
+     */
+    protected String resolveUploadPath(File file, String uploadPath) {
+        return uploadPath;
+    }
 
     /**
      * 获取输入源的原始文件名（含后缀）
