@@ -100,7 +100,13 @@ PREV_IMAGE="$(docker inspect -f '{{.Config.Image}}' picture-app 2>/dev/null || t
 
 # ------------------------------------------------------------- 3. 配置预校验
 log "校验 Nginx 配置"
-docker run --rm -v "$NGINX_CONF:/etc/nginx/conf.d/default.conf:ro" nginx:1.27-alpine nginx -t \
+# --add-host 是必需的：配置里写的是 proxy_pass http://app:8666，服务名 "app" 只在
+# compose 网络内可解析，而这个校验容器跑在默认网桥上。nginx 在加载配置时就要解析
+# upstream 主机名，不注入这条记录会误报 [emerg] host not found in upstream "app"，
+# 把一份本来就合法的配置判成语法错误。
+# 以后若在 nginx 配置里新增了别的 upstream 服务名，这里要同步补 --add-host。
+docker run --rm --add-host app:127.0.0.1 \
+  -v "$NGINX_CONF:/etc/nginx/conf.d/default.conf:ro" nginx:1.27-alpine nginx -t \
   || die "Nginx 配置有语法错误，已中止发布（上面的输出指出了具体行号）"
 
 # --------------------------------------------------------------- 4. 构建启动
