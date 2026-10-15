@@ -112,6 +112,14 @@ public class PictureVO implements Serializable {
      */
     private Long spaceId;
 
+    /**
+     * 主色调（腾讯云数据万象 imageAve 返回，形如 #736246）
+     * <p>
+     * 前端可据此渲染颜色色块、或在「按颜色查图」结果中高亮匹配色。
+     * 历史数据可能没有这个字段，前端需要判空。
+     */
+    private String picColor;
+
     /**  
      * 创建用户信息  
      */  

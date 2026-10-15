@@ -36,6 +36,7 @@ import com.lsj.demo.model.enums.PictureReviewStatusEnum;
 import com.lsj.demo.model.vo.PictureVO;
 import com.lsj.demo.model.vo.UserVO;
 import com.lsj.demo.service.PictureService;
+import com.lsj.demo.utils.ColorUtils;
 import com.lsj.demo.service.SpaceService;
 import com.lsj.demo.service.UserService;
 import lombok.extern.slf4j.Slf4j;
@@ -76,6 +77,12 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
      * 批量抓取一次最多允许的图片数，避免一次请求打爆对象存储和数据库
      */
     private static final int MAX_BATCH_COUNT = 30;
+
+    /**
+     * 按主色调查询时的默认颜色距离阈值（0~441，值越大返回的颜色范围越宽）。
+     * 含义：与目标颜色欧氏距离 <= 该值的图片才会被返回，并按距离升序排列。
+     */
+    private static final int DEFAULT_COLOR_DISTANCE = 80;
 
     /**
      * 抓取搜索页的超时时间，单位毫秒
@@ -207,6 +214,10 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         PictureUploadTemplate uploadTemplate = uploadFactory.getUploadTemplate(uploadType);
         UploadPictureResult uploadPictureResult = uploadTemplate.uploadPicture(inputSource, uploadPathPrefix);
 
+        // 主色调：以腾讯云数据万象 imageAve 返回为准，获取失败不阻断上传
+        String mainColor = cosManager.getMainColor(uploadPictureResult.getUrl());
+        uploadPictureResult.setPicColor(mainColor);
+
         // 容量要等拿到真实文件大小才能算，超限就把刚上传的文件删掉，不给对象存储留垃圾
         long newSize = uploadPictureResult.getPicSize() == null ? 0L : uploadPictureResult.getPicSize();
         if (space != null) {
@@ -234,6 +245,14 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         picture.setPicHeight(uploadPictureResult.getPicHeight());
         picture.setPicScale(uploadPictureResult.getPicScale());
         picture.setPicFormat(uploadPictureResult.getPicFormat());
+        // 主色调：直接存腾讯云 imageAve 返回的颜色；历史或获取失败的图片该字段为空
+        picture.setPicColor(uploadPictureResult.getPicColor());
+        if (mainColor != null) {
+            int[] rgb = ColorUtils.hexToRgb(mainColor);
+            picture.setPicColorR(rgb[0]);
+            picture.setPicColorG(rgb[1]);
+            picture.setPicColorB(rgb[2]);
+        }
         picture.setUserId(loginUser.getId());
         // 归属空间：前端据此区分公共图库和私有空间
         picture.setSpaceId(spaceId);
@@ -363,6 +382,26 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         Long reviewerId = pictureQueryRequest.getReviewerId();
         Long spaceId = pictureQueryRequest.getSpaceId();
 
+        // 按主色调（腾讯云 imageAve 返回）查询：解析目标颜色，准备颜色距离筛选与排序
+        String picColor = pictureQueryRequest.getPicColor();
+        Integer colorDistance = pictureQueryRequest.getColorDistance();
+        int[] targetRgb = StrUtil.isNotBlank(picColor) ? ColorUtils.hexToRgb(picColor) : null;
+        boolean colorQuery = targetRgb != null;
+        if (colorQuery) {
+            int r = targetRgb[0];
+            int g = targetRgb[1];
+            int b = targetRgb[2];
+            int threshold = (colorDistance != null && colorDistance >= 0)
+                    ? colorDistance : DEFAULT_COLOR_DISTANCE;
+            // 在数据库侧直接计算 RGB 欧氏距离，只返回距离不超过阈值且已提取主色调的图片
+            String distExpr = String.format(
+                    "SQRT(POW(picColorR - %d, 2) + POW(picColorG - %d, 2) + POW(picColorB - %d, 2))",
+                    r, g, b);
+            queryWrapper.isNotNull("picColorR");
+            queryWrapper.apply(distExpr + " <= " + threshold);
+            queryWrapper.orderByAsc(distExpr);
+        }
+
         // 从多字段中搜索
         if (StrUtil.isNotBlank(searchText)) {
             // 需要拼接查询条件
@@ -392,8 +431,10 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
                 queryWrapper.like("tags", "\"" + tag + "\"");
             }
         }
-        // 排序
-        queryWrapper.orderBy(StrUtil.isNotEmpty(sortField), "ascend".equals(sortOrder), sortField);
+        // 排序：按颜色查询时以「颜色距离」为唯一排序，避免和通用排序叠加产生歧义
+        if (!colorQuery) {
+            queryWrapper.orderBy(StrUtil.isNotEmpty(sortField), "ascend".equals(sortOrder), sortField);
+        }
         return queryWrapper;
     }
 
@@ -864,7 +905,10 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
                 .append("&introduction=").append(StrUtil.nullToEmpty(queryRequest.getIntroduction()))
                 .append("&sortField=").append(StrUtil.nullToEmpty(queryRequest.getSortField()))
                 // 统一成小写再比较，避免 "ASC" 与 "asc" 生成两个 key
-                .append("&sortOrder=").append(StrUtil.nullToEmpty(queryRequest.getSortOrder()).toLowerCase());
+                .append("&sortOrder=").append(StrUtil.nullToEmpty(queryRequest.getSortOrder()).toLowerCase())
+                // 按颜色查图：颜色与阈值必须进入缓存键，否则不同颜色会命中同一份缓存
+                .append("&picColor=").append(StrUtil.nullToEmpty(queryRequest.getPicColor()))
+                .append("&colorDistance=").append(queryRequest.getColorDistance());
         if (CollUtil.isNotEmpty(queryRequest.getTags())) {
             // 标签按字典序排序，顺序不同不应视作不同查询
             sb.append("&tags=").append(queryRequest.getTags().stream()

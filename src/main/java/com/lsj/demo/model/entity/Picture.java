@@ -124,6 +124,28 @@ public class Picture implements Serializable {
      */
     private Long spaceId;
 
+    /**
+     * 主色调（腾讯云数据万象 imageAve 返回，形如 #736246）
+     * <p>
+     * 用于「按颜色查图」。历史数据该字段可能为空，查询时会自动排除。
+     */
+    private String picColor;
+
+    /**
+     * 主色调 R 分量（0-255），配合 picColorG / picColorB 做颜色距离查询
+     */
+    private Integer picColorR;
+
+    /**
+     * 主色调 G 分量（0-255）
+     */
+    private Integer picColorG;
+
+    /**
+     * 主色调 B 分量（0-255）
+     */
+    private Integer picColorB;
+
 
     @TableField(exist = false)
     private static final long serialVersionUID = 1L;

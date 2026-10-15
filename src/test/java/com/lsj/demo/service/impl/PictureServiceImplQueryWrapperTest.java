@@ -7,6 +7,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -70,5 +71,36 @@ class PictureServiceImplQueryWrapperTest {
         String sql = wrapper.getSqlSegment().toLowerCase();
         assertTrue(sql.contains("name"), "缺少名称匹配: " + sql);
         assertTrue(sql.contains("introduction"), "缺少简介匹配: " + sql);
+    }
+
+    @Test
+    @DisplayName("按主色调查询应生成颜色距离筛选与排序，且不叠加通用排序")
+    void picColorShouldProduceDistanceFilter() {
+        PictureQueryRequest request = new PictureQueryRequest();
+        request.setPicColor("#736246");
+        // 即便传了通用排序，按颜色查询时也应被忽略
+        request.setSortField("createTime");
+        request.setSortOrder("descend");
+
+        QueryWrapper<Picture> wrapper = pictureService.getQueryWrapper(request);
+        String sql = wrapper.getSqlSegment().toUpperCase();
+        assertTrue(sql.contains("PICCOLORR"), "缺少主色调距离计算: " + sql);
+        assertTrue(sql.contains("POW("), "缺少 POW 计算: " + sql);
+        assertTrue(sql.contains("ASC"), "应按颜色距离升序: " + sql);
+        assertFalse(sql.contains("CREATETIME"), "按颜色查询不应叠加通用排序: " + sql);
+    }
+
+    @Test
+    @DisplayName("非法主色调不应触发颜色查询，回退到通用排序")
+    void invalidPicColorIgnored() {
+        PictureQueryRequest request = new PictureQueryRequest();
+        request.setPicColor("notacolor");
+        request.setSortField("createTime");
+        request.setSortOrder("descend");
+
+        QueryWrapper<Picture> wrapper = pictureService.getQueryWrapper(request);
+        String sql = wrapper.getSqlSegment().toUpperCase();
+        assertFalse(sql.contains("PICCOLORR"), "非法颜色不应生成颜色筛选: " + sql);
+        assertTrue(sql.contains("DESC"), "非法颜色应回退到通用排序: " + sql);
     }
 }

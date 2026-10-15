@@ -2,7 +2,11 @@ package com.lsj.demo.manager;
 
 import cn.hutool.core.io.FileUtil;
 import cn.hutool.core.util.StrUtil;
+import cn.hutool.http.HttpUtil;
+import cn.hutool.json.JSONObject;
+import cn.hutool.json.JSONUtil;
 import com.lsj.demo.conifg.CosClientConfig;
+import com.lsj.demo.utils.ColorUtils;
 import com.qcloud.cos.COSClient;
 import com.qcloud.cos.exception.CosClientException;
 import com.qcloud.cos.model.COSObject;
@@ -179,6 +183,36 @@ public class CosManager {
             log.info("已删除对象存储文件: {}", key);
         } catch (Exception e) {
             log.error("删除对象存储文件失败，key = {}", key, e);
+        }
+    }
+
+    /**
+     * 获取图片主色调（腾讯云数据万象 imageAve 接口）
+     * <p>
+     * 在图片可访问地址后追加 {@code ?imageAve}，数据万象会返回该图的平均主色调，
+     * 形如 {@code {"RGB":"0x736246"}}。这是「以腾讯云返回的主色调为准」的唯一来源，
+     * 不会在本地自行计算。
+     *
+     * @param imageUrl 图片的可访问地址（通常是对象存储原图地址）
+     * @return 规范化的主色调，形如 #736246；获取失败返回 null（不阻断上传）
+     */
+    public String getMainColor(String imageUrl) {
+        if (StrUtil.isBlank(imageUrl)) {
+            return null;
+        }
+        // URL 可能已带查询参数（一般没有），统一用 & 或 ? 追加
+        String aveUrl = imageUrl.contains("?") ? imageUrl + "&imageAve" : imageUrl + "?imageAve";
+        try {
+            String resp = HttpUtil.createGet(aveUrl).timeout(3000).execute().body();
+            if (StrUtil.isBlank(resp)) {
+                return null;
+            }
+            JSONObject json = JSONUtil.parseObj(resp);
+            String rgb = json.getStr("RGB");
+            return ColorUtils.normalizeHex(rgb);
+        } catch (Exception e) {
+            log.warn("获取图片主色调失败（不影响上传），url = {}: {}", imageUrl, e.getMessage());
+            return null;
         }
     }
 

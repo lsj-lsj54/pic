@@ -257,6 +257,27 @@ export const spaceApi = {
   listLevel: () => request('/space/list/level'),
 };
 
+/**
+ * 空间图库分析接口
+ * <p>
+ * 统一传 { spaceId, timeDimension, limit }：spaceId 为空表示全空间汇总（仅管理员），
+ * timeDimension 仅 trend 接口使用（day/week/month），limit 控制词云/排行条数。
+ */
+export const spaceAnalyzeApi = {
+  /** 资源使用分析（仪表盘：容量/数量占比） */
+  usage: (data) => request('/space/analyze/usage', { method: 'POST', body: cleanParams(data) }),
+  /** 分类分析（分组条形图：数量 + 总大小） */
+  category: (data) => request('/space/analyze/category', { method: 'POST', body: cleanParams(data) }),
+  /** 标签分析（词云图） */
+  tag: (data) => request('/space/analyze/tag', { method: 'POST', body: cleanParams(data) }),
+  /** 大小分段分析（饼图） */
+  size: (data) => request('/space/analyze/size', { method: 'POST', body: cleanParams(data) }),
+  /** 上传趋势（折线图，data.timeDimension = day/week/month） */
+  trend: (data) => request('/space/analyze/trend', { method: 'POST', body: cleanParams(data) }),
+  /** 空间使用排行（柱状图，仅管理员） */
+  rank: (data) => request('/space/analyze/rank', { method: 'POST', body: cleanParams(data) }),
+};
+
 /* ------------------------------ 文件模块 ------------------------------ */
 
 export const fileApi = {

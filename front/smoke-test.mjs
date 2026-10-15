@@ -112,6 +112,7 @@ const modules = [
   './js/views/mine.js',
   './js/views/space.js',
   './js/views/spaceDetail.js',
+  './js/views/analyze.js',
   './js/views/adminPicture.js',
   './js/views/adminUser.js',
 ];
@@ -218,6 +219,16 @@ renderedHtml.length = 0;
 spaceDetailView.render(createElementStub('div'), {});
 await tick();
 expectRendered('空间详情页缺少 id 时给出提示', '缺少空间 id');
+
+/* ------------------------------ 空间分析页渲染检查 ------------------------------ */
+
+/** 冒烟环境没有 ECharts，分析页应优雅降级而不是抛错 */
+const analyzeView = (await import('./js/views/analyze.js')).default;
+renderedHtml.length = 0;
+analyzeView.render(createElementStub('div'), {});
+await tick();
+expectRendered('分析页在无 ECharts 环境下给出友好提示', '图表组件');
+analyzeView.destroy();
 
 console.log(`\n共检查 ${modules.length} 个模块，失败 ${failed} 项`);
 process.exit(failed === 0 ? 0 : 1);

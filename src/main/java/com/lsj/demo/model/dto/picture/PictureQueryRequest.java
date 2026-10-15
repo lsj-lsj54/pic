@@ -94,6 +94,21 @@ public class PictureQueryRequest extends PageRequest implements Serializable {
      */
     private Long spaceId;
 
+    /**
+     * 主色调查询（腾讯云 imageAve 返回的颜色），形如 #736246 / 0x736246 / 736246
+     * <p>
+     * 传入后按「颜色距离」筛选并排序：返回与该颜色最接近、且距离不超过
+     * {@code colorDistance} 的图片。仅对已有主色调的图片生效。
+     */
+    private String picColor;
+
+    /**
+     * 颜色距离阈值（0 ~ 441，值越大返回的颜色范围越宽）
+     * <p>
+     * 不传或传负数时取默认值（见 PictureServiceImpl.DEFAULT_COLOR_DISTANCE）。
+     */
+    private Integer colorDistance;
+
 
 
     private static final long serialVersionUID = 1L;  

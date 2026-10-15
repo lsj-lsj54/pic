@@ -11,6 +11,7 @@ const routes = [
   { path: '/mine', view: () => import('./views/mine.js'), auth: true },
   { path: '/space', view: () => import('./views/space.js'), auth: true },
   { path: '/space/detail', view: () => import('./views/spaceDetail.js'), auth: true },
+  { path: '/analyze', view: () => import('./views/analyze.js'), auth: true },
   { path: '/admin/picture', view: () => import('./views/adminPicture.js'), admin: true },
   { path: '/admin/user', view: () => import('./views/adminUser.js'), admin: true },
 ];
@@ -72,6 +73,7 @@ function renderShell(layout) {
           <a href="#/" data-nav="/">图片浏览</a>
           <a href="#/mine" data-nav="/mine">我的图片</a>
           <a href="#/space" data-nav="/space">我的空间</a>
+          <a href="#/analyze" data-nav="/analyze">空间分析</a>
           ${adminNav}
         </nav>
         <div class="user-area">

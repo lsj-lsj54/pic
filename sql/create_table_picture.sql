@@ -43,3 +43,13 @@ ALTER TABLE picture
 
 -- 创建索引
 CREATE INDEX idx_spaceId ON picture (spaceId);
+
+
+-- 主色调（腾讯云数据万象 imageAve 返回），用于「按颜色查图」
+-- 历史数据该字段为空，上传时由后端回填；查询会按 RGB 欧氏距离筛选。
+ALTER TABLE picture
+    ADD COLUMN picColor  varchar(7)        null comment '主色调（腾讯云 imageAve 返回，形如 #736246）',
+    ADD COLUMN picColorR tinyint unsigned  null comment '主色调 R 分量（0-255）',
+    ADD COLUMN picColorG tinyint unsigned  null comment '主色调 G 分量（0-255）',
+    ADD COLUMN picColorB tinyint unsigned  null comment '主色调 B 分量（0-255）';
+

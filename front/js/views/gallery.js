@@ -11,14 +11,79 @@ import { openPictureDetail, openUploadModal, thumbUrl } from '../components/pict
 /** 每页数量，后端限制不能超过 20 */
 const PAGE_SIZE = 12;
 
+/** 颜色选择器未激活时回填的占位色（不用于查询，仅让原生取色器有初始显示） */
+const DEFAULT_PICKER_COLOR = '#736246';
+
+/** 主色调查询的容差上限（RGB 欧氏距离最大约 441，超出即全量） */
+const MAX_COLOR_DISTANCE = 441;
+
+/** 后端默认容差，与 PictureServiceImpl.DEFAULT_COLOR_DISTANCE 保持一致 */
+const DEFAULT_COLOR_DISTANCE = 80;
+
 const query = {
   current: 1,
   pageSize: PAGE_SIZE,
   searchText: '',
   category: '',
+  // 按主色调（腾讯云 imageAve 返回）查图：picColor 为空表示不按颜色筛选
+  picColor: '',
+  colorDistance: DEFAULT_COLOR_DISTANCE,
   sortField: 'createTime',
   sortOrder: 'descend',
 };
+
+/** 按色筛选时重置页码并重新拉取 */
+function reload(el) {
+  query.current = 1;
+  load(el);
+}
+
+/** 取色器变化时应用颜色筛选（同时同步工具栏控件状态） */
+function applyColor(hex, el) {
+  query.picColor = (hex || '').toUpperCase();
+  const ci = $('#color-input', el);
+  if (ci && query.picColor) {
+    ci.value = query.picColor;
+  }
+  syncColorControls(el);
+  reload(el);
+}
+
+/** 清除颜色筛选，恢复默认取色器与容差 */
+function clearColor(el) {
+  query.picColor = '';
+  query.colorDistance = DEFAULT_COLOR_DISTANCE;
+  const ci = $('#color-input', el);
+  if (ci) {
+    ci.value = DEFAULT_PICKER_COLOR;
+  }
+  const cd = $('#color-dist', el);
+  if (cd) {
+    cd.value = String(DEFAULT_COLOR_DISTANCE);
+  }
+  const cv = $('#color-dist-val', el);
+  if (cv) {
+    cv.textContent = String(DEFAULT_COLOR_DISTANCE);
+  }
+  syncColorControls(el);
+  reload(el);
+}
+
+/**
+ * 同步颜色筛选相关控件的状态：
+ * - 已选色时显示「清除颜色」按钮，并禁用排序下拉（后端会按颜色距离升序，排序参数被忽略）
+ * - 未选色时隐藏清除按钮、启用排序
+ */
+function syncColorControls(el) {
+  const clearBtn = $('#color-clear', el);
+  if (clearBtn) {
+    clearBtn.hidden = !query.picColor;
+  }
+  const sortSelect = $('#sort-select', el);
+  if (sortSelect) {
+    sortSelect.disabled = !!query.picColor;
+  }
+}
 
 /** 拉取当前页数据并渲染 */
 async function load(el) {
@@ -49,6 +114,14 @@ function renderGrid(el, page) {
       const tags = (item.tags || []).slice(0, 3)
         .map((tag) => `<span class="tag tag-sm">${escapeHtml(tag)}</span>`).join('');
       const review = REVIEW_STATUS[item.reviewStatus];
+      // 主色调色块：后端在上传时由腾讯云 imageAve 回填，历史图片该字段为空则不展示
+      const colorSwatch = item.picColor
+        ? `<button class="color-swatch" type="button" data-color="${escapeHtml(item.picColor)}"
+            title="按此主色调查找相似图片">主色
+            <span class="color-dot" style="background:${escapeHtml(item.picColor)}"></span>
+            <span class="color-hex">${escapeHtml(item.picColor.toUpperCase())}</span>
+          </button>`
+        : '';
       return `
         <article class="card" data-id="${item.id}">
           <div class="card-img">
@@ -60,6 +133,7 @@ function renderGrid(el, page) {
               ${escapeHtml(item.introduction) || '暂无简介'}
             </p>
             <div class="card-tags">${tags}${review ? `<span class="tag tag-sm ${review.cls}">${review.text}</span>` : ''}</div>
+            ${colorSwatch}
             <div class="card-meta">
               <span>${escapeHtml(owner)}</span>
               <span>${formatTime(item.createTime)}</span>
@@ -89,6 +163,16 @@ function renderGrid(el, page) {
     imgBox.addEventListener('click', () => {
       const id = imgBox.closest('.card').dataset.id;
       openPictureDetail(id, { onChanged: () => load(el) });
+    });
+  });
+
+  // 点击主色块：以该图的主色调作为筛选色，进入「按色找相似」
+  $$('.color-swatch', grid).forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      applyColor(btn.dataset.color, el);
+      // 滚回顶部，方便看到筛选结果
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
   });
 
@@ -125,6 +209,18 @@ export default {
             <option value="">全部分类</option>
             ${categoryOptions}
           </select>
+          <div class="color-filter" id="color-filter">
+            <label class="color-field" title="按主色调筛选相似图片">
+              <span class="color-field-label">主色调</span>
+              <input type="color" id="color-input" value="${DEFAULT_PICKER_COLOR}">
+            </label>
+            <label class="color-range" title="相似度容差，越大匹配越宽松">
+              <span>容差 <b id="color-dist-val">${DEFAULT_COLOR_DISTANCE}</b></span>
+              <input type="range" id="color-dist" min="0" max="${MAX_COLOR_DISTANCE}" step="5"
+                     value="${DEFAULT_COLOR_DISTANCE}">
+            </label>
+            <button class="btn btn-sm" id="color-clear" type="button" hidden>清除颜色</button>
+          </div>
         </div>
         <div class="toolbar-right">
           <select id="sort-select" class="input input-select">
@@ -158,6 +254,34 @@ export default {
       query.current = 1;
       load(el);
     });
+
+    // 取色器：拖动即筛选，防抖避免频繁请求
+    $('#color-input', el).addEventListener('input', debounce((e) => {
+      const hex = e.target.value || '';
+      if (!hex) {
+        return;
+      }
+      applyColor(hex, el);
+    }, 300));
+
+    // 容差滑块：仅在选择颜色后才会触发重新筛选
+    $('#color-dist', el).addEventListener('input', (e) => {
+      const v = Number(e.target.value);
+      query.colorDistance = v;
+      $('#color-dist-val', el).textContent = String(v);
+      if (query.picColor) {
+        reload(el);
+      }
+    });
+
+    $('#color-clear', el).addEventListener('click', () => clearColor(el));
+
+    // 颜色筛选：把已存在的查询态同步到控件，避免重新进入页面时控件与 query 不一致
+    const colorInput = $('#color-input', el);
+    if (query.picColor && colorInput) {
+      colorInput.value = query.picColor;
+    }
+    syncColorControls(el);
 
     $('#upload-btn', el).addEventListener('click', () => {
       if (!state.isLogin()) {

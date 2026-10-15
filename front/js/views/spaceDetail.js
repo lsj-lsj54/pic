@@ -35,6 +35,7 @@ function renderSpaceInfo(el, space) {
     <div class="space-detail-head">
       <h2 class="page-title">${escapeHtml(space.spaceName)}</h2>
       <span class="tag ${level.cls}">${level.text}</span>
+      <a class="btn btn-sm" href="#/analyze?spaceId=${space.id}">查看分析</a>
     </div>
     ${renderSpaceUsage(space)}`;
 }

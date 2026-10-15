@@ -48,4 +48,12 @@ public class UploadPictureResult {
      */  
     private String picFormat;  
   
+    /**
+     * 主色调（腾讯云数据万象 imageAve 返回，形如 #736246）
+     * <p>
+     * 上传成功后由 CosManager.getMainColor 回填；获取失败时为 null，
+     * 不影响上传主流程。
+     */
+    private String picColor;
+
 }
