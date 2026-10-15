@@ -21,7 +21,7 @@
 | **空间** | 公共图库 + 私有空间两级模型，空间按级别（普通/专业/旗舰）限数量与容量，用量随图片增删实时结算 |
 | **权限** | 注解式角色鉴权（AOP）+ 数据级归属校验：图片、空间都只有本人（或空间创建者）与管理员可操作 |
 
-> 详细部署（服务器选型、Docker Compose、Nginx、HTTPS、日常运维）见 [docs/deploy.md](docs/deploy.md)。
+> 详细部署（服务器选型、Docker Compose、Nginx、HTTPS、日常运维）见 [docs/deploy.md](docs/deploy.md)，免费方案见 [docs/deploy-free.md](docs/deploy-free.md)。
 
 <!-- 想放截图时：把图片放到 docs/images/ 下，然后取消下面这段注释即可（在 GitHub 上会渲染成表格）
 
@@ -429,6 +429,17 @@ docker compose --env-file deploy/.env -f deploy/docker-compose.yml up -d --build
 | `deploy/nginx/https.conf` | HTTPS 站点：证书、TLS 参数、HSTS、80→443 跳转 |
 
 服务器选型、备案、**腾讯云专项落地清单（安全组、COS 子账号最小权限、HTTPS、排障清单）**、日常运维与数据备份，见 **[docs/deploy.md](docs/deploy.md)**。
+
+用**阿里云 ECS**？见 **[docs/deploy-aliyun.md](docs/deploy-aliyun.md)** —— 阿里云的价格与「续费同价」坑、安全组/防火墙、专属镜像加速器、备案，
+以及**跨云场景下「图片还在腾讯云 COS」该怎么算账、要不要迁 OSS** 的完整评估。
+
+**不想花钱？** 见 **[docs/deploy-free.md](docs/deploy-free.md)** —— 2026 年还活着的免费方案盘点（Oracle Always Free、Cloudflare Pages、Render…以及已经取消免费层的 Heroku / Fly.io / Koyeb / Railway）。
+
+免 Redis 的低配编排（`deploy/docker-compose.free.yml`）适合 1~2G 内存的免费小机器：
+
+```bash
+docker compose --env-file deploy/.env -f deploy/docker-compose.free.yml up -d --build
+```
 
 ---
 
