@@ -5,8 +5,10 @@ import { pictureApi, USE_CACHE } from '../api.js';
 import {
   $, $$, state, toast, escapeHtml, formatTime, renderPager, renderEmpty,
   debounce, CATEGORY_OPTIONS, REVIEW_STATUS, normalizePage,
+  renderSkeleton, revealOnScroll, bindImageFade, attachRipple, attachRippleAll,
 } from '../ui.js';
 import { openPictureDetail, openUploadModal, thumbUrl } from '../components/picture.js';
+import { openLightbox } from '../components/lightbox.js';
 
 /** 每页数量，后端限制不能超过 20 */
 const PAGE_SIZE = 12;
@@ -88,7 +90,8 @@ function syncColorControls(el) {
 /** 拉取当前页数据并渲染 */
 async function load(el) {
   const grid = $('#grid', el);
-  grid.innerHTML = '<div class="loading">加载中…</div>';
+  // 骨架屏占位：与真实卡片同构，避免加载时页面高度剧烈跳动
+  grid.innerHTML = renderSkeleton(PAGE_SIZE);
   try {
     // 开启缓存开关后走带多级缓存的接口，减少数据库压力
     const data = USE_CACHE
@@ -123,24 +126,26 @@ function renderGrid(el, page) {
           </button>`
         : '';
       return `
-        <article class="card" data-id="${item.id}">
+        <article class="card reveal" data-id="${item.id}">
           <div class="card-img">
-            <img src="${escapeHtml(thumbUrl(item))}" alt="${escapeHtml(item.name)}" loading="lazy">
+            <img src="${escapeHtml(thumbUrl(item))}" alt="${escapeHtml(item.name)}" loading="lazy" data-fade>
+            ${review ? `<span class="card-badge ${review.cls}">${review.text}</span>` : ''}
+            <div class="card-quick">
+              <button class="btn btn-sm" data-action="zoom" type="button" title="全屏查看">放大</button>
+              <button class="btn btn-sm" data-action="detail" type="button" title="查看详细信息">详情</button>
+            </div>
           </div>
           <div class="card-body">
             <h3 class="card-title" title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</h3>
             <p class="card-desc" title="${escapeHtml(item.introduction)}">
               ${escapeHtml(item.introduction) || '暂无简介'}
             </p>
-            <div class="card-tags">${tags}${review ? `<span class="tag tag-sm ${review.cls}">${review.text}</span>` : ''}</div>
+            <div class="card-tags">${tags}</div>
             ${colorSwatch}
             <div class="card-meta">
               <span>${escapeHtml(owner)}</span>
               <span>${formatTime(item.createTime)}</span>
             </div>
-          </div>
-          <div class="card-actions">
-            <button class="btn btn-sm" data-action="detail" type="button">查看</button>
           </div>
         </article>`;
     }).join('');
@@ -152,16 +157,28 @@ function renderGrid(el, page) {
     total: page.total,
   });
 
-  // 卡片点击进详情
-  $$('[data-action="detail"]', grid).forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const id = btn.closest('.card').dataset.id;
-      openPictureDetail(id, { onChanged: () => load(el) });
-    });
-  });
+  /** 打开全屏查看器，并把本页图片都带进去，支持左右切换 */
+  function openViewer(id) {
+    const index = records.findIndex((item) => String(item.id) === String(id));
+    openLightbox({ pictures: records, index: index < 0 ? 0 : index });
+  }
+
+  // 点击图片直接全屏查看（列表页最常见诉求就是「看清楚点」）
   $$('.card-img', grid).forEach((imgBox) => {
     imgBox.addEventListener('click', () => {
-      const id = imgBox.closest('.card').dataset.id;
+      openViewer(imgBox.closest('.card').dataset.id);
+    });
+  });
+
+  // 快速操作：详情走原弹窗，放大走全屏查看器
+  $$('[data-action]', grid).forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const id = btn.closest('.card').dataset.id;
+      if (btn.dataset.action === 'zoom') {
+        openViewer(id);
+        return;
+      }
       openPictureDetail(id, { onChanged: () => load(el) });
     });
   });
@@ -187,6 +204,12 @@ function renderGrid(el, page) {
       load(el);
     });
   });
+
+  // 图片淡入 / 卡片错峰入场的动效绑定（放在模板写入之后、事件绑定之后均可）
+  bindImageFade(grid);
+  revealOnScroll(grid);
+  attachRippleAll(grid);
+  $$('[data-action], .color-swatch', grid).forEach(attachRipple);
 }
 
 export default {

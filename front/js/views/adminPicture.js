@@ -3,8 +3,7 @@
  */
 import { pictureApi } from '../api.js';
 import {
-  $, $$, state, toast, escapeHtml, formatTime, formatSize, truncate, debounce,
-  renderPager, renderEmpty, confirmDialog, reviewTag, showModal, closeModal, normalizePage,
+  $, $$, state, toast, escapeHtml, formatTime, formatSize, truncate, debounce, renderPager, renderEmpty, confirmDialog, reviewTag, showModal, closeModal, normalizePage, renderTableSkeleton,
 } from '../ui.js';
 import { openEditModal, openUploadModal, thumbUrl } from '../components/picture.js';
 
@@ -23,7 +22,7 @@ const query = {
 /** 拉取图片分页数据（实体接口，能看到审核信息） */
 async function load(el) {
   const tbody = $('#tbody', el);
-  tbody.innerHTML = '<tr><td colspan="7" class="loading">加载中…</td></tr>';
+  tbody.innerHTML = renderTableSkeleton(7, 5);
   try {
     const data = await pictureApi.listByPage({ ...query });
     renderTable(el, normalizePage(data));

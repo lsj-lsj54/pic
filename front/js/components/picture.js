@@ -6,6 +6,7 @@ import {
   $, $$, state, toast, showModal, closeModal, escapeHtml,
   getFormValues, formatTime, formatSize, CATEGORY_OPTIONS, debounce,
 } from '../ui.js';
+import { openLightbox } from './lightbox.js';
 
 /** 允许上传的后端格式，须与 FileManager.validPicture 保持一致 */
 const ALLOW_FORMAT = ['jpg', 'jpeg', 'png', 'webp'];
@@ -133,6 +134,31 @@ export function compressImage(file) {
   });
 }
 
+/** 上传进度环的圆周长（r = 19），用于描边动画 */
+const RING_CIRCUMFERENCE = 2 * Math.PI * 19;
+
+/**
+ * 上传进度环
+ * <p>
+ * fetch 拿不到真实上传进度，因此「上传中」用旋转弧表示进行中，
+ * 完成后环变绿并弹出一个对勾——比「上传中…」三个字更有确定感。
+ *
+ * @param {string} stateClass is-indeterminate | is-done
+ * @returns {string} HTML 片段
+ */
+function renderRing(stateClass) {
+  return `
+    <span class="upload-ring ${stateClass}" aria-hidden="true">
+      <svg viewBox="0 0 44 44">
+        <circle class="ring-bg" cx="22" cy="22" r="19"></circle>
+        <circle class="ring-fg" cx="22" cy="22" r="19"
+                stroke-dasharray="${RING_CIRCUMFERENCE.toFixed(1)}"
+                stroke-dashoffset="0"></circle>
+      </svg>
+      ${stateClass === 'is-done' ? '<span class="upload-check">✓</span>' : ''}
+    </span>`;
+}
+
 /**
  * 打开上传弹窗
  *
@@ -234,8 +260,10 @@ export function openUploadModal({
       return;
     }
     listEl.innerHTML = tasks.map((task, index) => `
-      <div class="upload-item">
-        <img src="${task.preview}" alt="预览">
+      <div class="upload-item ${task.status === 'done' ? 'is-done' : ''} ${task.status === 'failed' ? 'is-failed' : ''}">
+        ${task.status === 'uploading' ? renderRing('is-indeterminate')
+    : task.status === 'done' ? renderRing('is-done')
+      : `<img src="${task.preview}" alt="预览">`}
         <div class="upload-item-main">
           <div class="upload-item-name" title="${escapeHtml(task.file.name)}">
             ${escapeHtml(task.file.name)}
@@ -489,7 +517,8 @@ export async function openPictureDetail(id, { onChanged } = {}) {
     width: '760px',
     content: `
       <div class="detail">
-        <div class="detail-img">
+        <div class="detail-img" id="detail-img" role="button" tabindex="0"
+             aria-label="全屏查看图片">
           <img src="${escapeHtml(originUrl(picture))}" alt="${escapeHtml(picture.name)}">
         </div>
         <div class="detail-info">
@@ -513,6 +542,20 @@ export async function openPictureDetail(id, { onChanged } = {}) {
         </div>
       </div>`,
   });
+
+  // 点击图片（或键盘回车/空格）进入全屏查看器，支持缩放与键盘操作；
+  // 详情弹窗保持打开，关掉查看器即可回到详情
+  const detailImg = $('#detail-img', modal);
+  if (detailImg) {
+    const openViewer = () => openLightbox({ pictures: [picture], index: 0 });
+    detailImg.addEventListener('click', openViewer);
+    detailImg.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        openViewer();
+      }
+    });
+  }
 
   const editBtn = $('#detail-edit', modal);
   if (editBtn) {

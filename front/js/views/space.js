@@ -9,6 +9,7 @@ import {
   $, $$, state, toast, escapeHtml, formatTime, renderPager, renderEmpty,
   confirmDialog, showModal, closeModal, getFormValues, spaceLevelInfo,
   spaceLevelOptions, renderSpaceUsage, normalizePage,
+  renderSkeleton, revealOnScroll, attachRippleAll,
 } from '../ui.js';
 import { navigate } from '../app.js';
 
@@ -25,7 +26,7 @@ const query = {
 /** 拉取当前用户自己的空间 */
 async function load(el) {
   const grid = $('#grid', el);
-  grid.innerHTML = '<div class="loading">加载中…</div>';
+  grid.innerHTML = renderSkeleton(PAGE_SIZE);
   try {
     const data = await spaceApi.myListVOByPage({ ...query });
     renderGrid(el, normalizePage(data));
@@ -49,7 +50,7 @@ function renderGrid(el, page) {
   grid.innerHTML = records.map((item) => {
     const level = spaceLevelInfo(item.spaceLevel);
     return `
-      <article class="space-card" data-id="${item.id}">
+      <article class="space-card reveal" data-id="${item.id}">
         <div class="space-card-head">
           <h3 class="space-name" title="${escapeHtml(item.spaceName)}">${escapeHtml(item.spaceName)}</h3>
           <span class="tag ${level.cls}">${level.text}</span>
@@ -101,6 +102,9 @@ function renderGrid(el, page) {
       load(el);
     });
   });
+
+  revealOnScroll(grid);
+  attachRippleAll(grid);
 }
 
 /** 创建空间弹窗 */

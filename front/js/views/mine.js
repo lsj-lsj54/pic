@@ -5,8 +5,12 @@ import { pictureApi } from '../api.js';
 import {
   $, $$, state, toast, escapeHtml, formatTime, formatSize,
   renderPager, renderEmpty, confirmDialog, REVIEW_STATUS, normalizePage,
+  renderSkeleton, revealOnScroll, bindImageFade, attachRippleAll, attachRipple,
 } from '../ui.js';
-import { openPictureDetail, openEditModal, openUploadModal, thumbUrl } from '../components/picture.js';
+import {
+  openPictureDetail, openEditModal, openUploadModal, thumbUrl,
+} from '../components/picture.js';
+import { openLightbox } from '../components/lightbox.js';
 
 /** 每页数量，后端限制不能超过 20 */
 const PAGE_SIZE = 12;
@@ -21,7 +25,7 @@ const query = {
 /** 拉取当前登录用户的图片 */
 async function load(el) {
   const grid = $('#grid', el);
-  grid.innerHTML = '<div class="loading">加载中…</div>';
+  grid.innerHTML = renderSkeleton(PAGE_SIZE);
   try {
     const data = await pictureApi.listVOByPage({
       ...query,
@@ -63,9 +67,9 @@ function renderGrid(el, page) {
   grid.innerHTML = records.map((item) => {
     const review = REVIEW_STATUS[item.reviewStatus] || { text: '未知', cls: 'tag-pending' };
     return `
-      <article class="card" data-id="${item.id}">
+      <article class="card reveal" data-id="${item.id}">
         <div class="card-img">
-          <img src="${escapeHtml(thumbUrl(item))}" alt="${escapeHtml(item.name)}" loading="lazy">
+          <img src="${escapeHtml(thumbUrl(item))}" alt="${escapeHtml(item.name)}" loading="lazy" data-fade>
           <span class="card-badge ${review.cls}">${review.text}</span>
         </div>
         <div class="card-body">
@@ -128,6 +132,20 @@ function renderGrid(el, page) {
       load(el);
     });
   });
+
+  // 点击缩略图全屏查看（与浏览页一致），详情仍走「查看」按钮
+  $$('.card-img', grid).forEach((imgBox) => {
+    imgBox.addEventListener('click', () => {
+      const id = imgBox.closest('.card').dataset.id;
+      const index = records.findIndex((item) => String(item.id) === String(id));
+      openLightbox({ pictures: records, index: index < 0 ? 0 : index });
+    });
+  });
+
+  bindImageFade(grid);
+  revealOnScroll(grid);
+  attachRippleAll(grid);
+  $$('[data-action]', grid).forEach(attachRipple);
 }
 
 export default {

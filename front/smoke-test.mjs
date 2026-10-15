@@ -107,6 +107,7 @@ const modules = [
   './js/ui.js',
   './js/app.js',
   './js/components/picture.js',
+  './js/components/lightbox.js',
   './js/views/auth.js',
   './js/views/gallery.js',
   './js/views/mine.js',

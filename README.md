@@ -66,6 +66,7 @@
 | 我的图片 | 自己上传的公共图库图片，带审核状态角标，可编辑 / 重传 / 删除 |
 | 空间 | 创建（级别决定限额）、重命名、删除（连带清理空间内图片）、空间列表带数量与容量进度条 |
 | 空间分析 | 空间资源用量（容量/数量仪表盘）、分类分布（分组条形图）、标签词云、大小分段（饼图）、上传趋势（按天/周/月折线）；管理员可汇总全系统并查看空间使用排行（ECharts） |
+| 交互与观感 | 全屏图片查看器（滚轮/双击缩放、拖拽平移、键盘 ←→/±/f 与缩略图导航）、卡片悬停遮罩 + 快速操作、列表骨架屏、Toast 堆叠与进度条、滚动渐入、按钮涟漪；统一设计 token（色彩/阴影/圆角/缓动）与 :focus-visible 焦点环，动效遵循 prefers-reduced-motion |
 | 空间内图片 | 上传到指定空间（上传前校验数量、拿到真实体积后校验容量）、浏览、编辑、重传、删除，用量实时回填 |
 | 用户管理 | 用户分页、按昵称/角色筛选、新增、编辑、删除（不能删自己） |
 | 前端体验 | hash 路由 + 视图懒加载、统一请求封装（自动解包 BaseResponse、40100 自动跳登录）、Toast / Modal / 分页等通用组件 |
@@ -403,10 +404,31 @@ API_BASE=http://localhost:8688/api node e2e-test.mjs   # 打其他后端地址
 
 ```bash
 cp deploy/.env.example deploy/.env    # 填数据库密码与 COS 密钥（.env 已被 gitignore）
+chmod 600 deploy/.env
+bash deploy/deploy.sh                 # 校验 → 构建 → 启动 → 健康检查，失败自动回滚
+```
+
+也可以手动执行 compose（等价，只是没有健康门禁与回滚）：
+
+```bash
 docker compose --env-file deploy/.env -f deploy/docker-compose.yml up -d --build
 ```
 
-服务器选型、备案、Nginx 配置、HTTPS、日常运维与数据备份，见 **[docs/deploy.md](docs/deploy.md)**。
+配套脚本与资产：
+
+| 文件 | 用途 |
+| --- | --- |
+| `deploy/deploy.sh` | 一键发布：拦住占位密码、预校验 Nginx 配置、按 git SHA 打标签、健康检查、失败自动回滚 |
+| `deploy/backup.sh` | 数据库备份：mysqldump + gzip + 按天保留 + 可选上传 COS |
+| `deploy/docker-compose.yml` | MySQL + Redis + 后端 + 前端；端口、镜像标签均可用 `.env` 覆盖 |
+| `deploy/docker-compose.https.yml` | HTTPS 叠加配置（挂证书 + 443），配腾讯云免费证书用 |
+| `deploy/mysql/init.sql` | 首次部署建库建表（`CREATE TABLE IF NOT EXISTS`，可重复执行） |
+| `deploy/mysql/migration-*.sql` | 已有库的增量迁移（缩略图字段、主色调字段） |
+| `deploy/mysql/create-app-user.sql` | 建只对 `picture` 库有权限的应用账号（最小权限加固） |
+| `deploy/nginx/default.conf` | HTTP 站点：静态托管 + `/api` 反代 + 运行时配置替换 |
+| `deploy/nginx/https.conf` | HTTPS 站点：证书、TLS 参数、HSTS、80→443 跳转 |
+
+服务器选型、备案、**腾讯云专项落地清单（安全组、COS 子账号最小权限、HTTPS、排障清单）**、日常运维与数据备份，见 **[docs/deploy.md](docs/deploy.md)**。
 
 ---
 

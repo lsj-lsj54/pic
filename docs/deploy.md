@@ -245,3 +245,266 @@ docker exec -it picture-mysql mysql -uroot -p picture
 已统一整理为 [`deploy/mysql/init.sql`](../deploy/mysql/init.sql)，全部 `CREATE TABLE IF NOT EXISTS`，审核字段直接建在表里，可重复执行。
 
 **另外提醒**：`application.yml` 里的数据库密码是明文 `748374075`，服务器上通过 `SPRING_DATASOURCE_PASSWORD` 覆盖，别把本地密码带到线上。本地那份 yml 建议也改掉。
+
+---
+
+# 附：腾讯云专项落地清单
+
+上面是通用流程，这一节是**腾讯云服务器**专用的：从控制台买机器到线上验收，按顺序照做即可。
+
+## 6.1 买机器
+
+| 项目 | 建议 | 说明 |
+| --- | --- | --- |
+| 机型 | **轻量应用服务器** | 便宜、自带防火墙面板，个人项目够用；预算宽松或用得上云硬盘/VPC 就选 CVM |
+| 镜像 | Ubuntu 22.04 LTS | Docker 装起来最顺；不要选 Windows |
+| 地域 | **跟 COS 同地域** | 你的桶在 `ap-guangzhou`，机器也选**广州/广州三区**，走内网访问，省流量费、延迟低 |
+| 配置 | 2 核 2G / 40G SSD | 起步够用；2 核 4G 更宽松 |
+| 带宽 | 3~4 Mbps | 图片走 COS，服务器只出网页和接口，够用 |
+| 购买方式 | **挑「续费同价」的机型** | 38 元/年那种秒杀款，第二年常涨到上千元 |
+
+## 6.2 安全组 / 防火墙（最容易漏的一步）
+
+轻量服务器叫「防火墙」，CVM 叫「安全组」，**只放行下面这几个端口**：
+
+| 方向 | 端口 | 来源 | 用途 |
+| --- | --- | --- | --- |
+| 入站 | TCP 22 | **只填你的家庭公网 IP/32** | SSH 登录 |
+| 入站 | TCP 80 | 0.0.0.0/0 | HTTP |
+| 入站 | TCP 443 | 0.0.0.0/0 | HTTPS（配了证书才需要） |
+| 入站 | TCP 8080 | 0.0.0.0/0 | 未备案时用非标端口（可选） |
+| 出站 | 全部 | 0.0.0.0/0 | 拉镜像、调 COS、调内容审核 |
+
+> **绝对不要**把 3306（MySQL）、6379（Redis）、8666（后端）开放到公网。
+> `deploy/docker-compose.yml` 里这三个服务都没有往宿主机映射端口，安全组再关一层，双保险。
+> 公网数据库被扫到爆破是这类个人项目最常见的翻车方式。
+
+## 6.3 备案与端口：先用哪条路
+
+| 场景 | 能用的端口 | 说明 |
+| --- | --- | --- |
+| 大陆机器 + 域名，**已备案** | 80 / 443 | 最正规，体验最好 |
+| 大陆机器 + 域名，**未备案** | 只能非标端口 | 80/443 会被运营商拦，表现为「域名打不开、`IP:8080` 能开」 |
+| 大陆机器 + 只用 IP | 非标端口 | 在 `.env` 里设 `HTTP_PORT=8080`，访问 `http://<IP>:8080/` |
+| 香港 / 新加坡机器 | 80 / 443 随便用 | 免备案，代价是国内访问慢一些（50~150ms） |
+
+改端口只要动 `.env` 一行：
+
+```bash
+HTTP_PORT=8080
+```
+
+然后重新 `bash deploy/deploy.sh`，记得安全组里同时放行 8080。
+
+## 6.4 装 Docker
+
+```bash
+sudo apt update && sudo apt install -y git curl
+curl -fsSL https://get.docker.com | sudo sh
+sudo systemctl enable --now docker
+sudo usermod -aG docker $USER     # 重新登录后就不用每次 sudo
+docker compose version            # 需要 v2，Docker 20.10+
+```
+
+拉镜像慢的话配一下加速器（`/etc/docker/daemon.json`），改完 `sudo systemctl restart docker`：
+
+```json
+{
+  "registry-mirrors": ["https://mirror.ccs.tencentyun.com"],
+  "log-driver": "json-file",
+  "log-opts": { "max-size": "10m", "max-file": "3" }
+}
+```
+
+> `mirror.ccs.tencentyun.com` 只在**腾讯云内网**可用；如果是别的云或本机，换成对应的公共加速地址。
+
+**2 核 2G 的机器，构建前建议先加 2G swap**，否则 Maven 构建可能 OOM 被 kill：
+
+```bash
+sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile
+sudo mkswap /swapfile && sudo swapon /swapfile
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+```
+
+## 6.5 COS 子账号最小权限（重要，别用主账号密钥）
+
+服务器上放的是**明文密钥**，一旦机器被入侵，主账号密钥等于整个云账号失守。正确做法：
+
+1. 腾讯云控制台 → **访问管理 CAM** → 用户 → 新建用户 → **自定义创建** → 只勾「编程访问」（不要勾控制台登录）
+2. 不给它任何预设策略，新建一条**自定义策略**（把 `1504102210` 换成你的 APPID、桶名换成你的）：
+
+```json
+{
+  "version": "2.0",
+  "statement": [
+    {
+      "effect": "allow",
+      "action": [
+        "cos:GetService", "cos:GetBucket", "cos:HeadBucket",
+        "cos:PutObject", "cos:GetObject", "cos:HeadObject", "cos:DeleteObject",
+        "ci:*"
+      ],
+      "resource": [
+        "qcs::cos:ap-guangzhou:uid/1504102210:picture-1504102210/*",
+        "qcs::cos:ap-guangzhou:uid/1504102210:picture-1504102210/"
+      ]
+    }
+  ]
+}
+```
+
+3. 把生成的 SecretId / SecretKey 填到 `.env` 的 `COS_SECRET_ID` / `COS_SECRET_KEY`
+
+> `ci:*` 是数据万象（Data CI）的权限 —— 本项目的图片压缩、缩略图、主色调 `imageAve` 都走它。
+> 只给一个桶的权限，密钥泄露的影响面就被限制在这一个桶里。
+>
+> **顺带提醒**：你本地 `application-local.yml` 里用的是主账号密钥，建议也在控制台轮换一次，
+> 并把本地那份也换成子账号密钥。
+
+## 6.6 部署：三种方式选一个
+
+### 方式 A：服务器上拉代码 + 一键脚本（推荐）
+
+```bash
+# 1. 本机先把改动提交推送到远端（重要：没推送的代码服务器拉不到）
+git add -A && git commit -m "..." && git push
+
+# 2. 服务器上
+sudo mkdir -p /root && cd /root
+git clone <你的仓库地址> picture && cd picture
+cp deploy/.env.example deploy/.env
+vi deploy/.env            # 填 MySQL 密码、Redis 密码、5 个 COS 参数
+chmod 600 deploy/.env
+bash deploy/deploy.sh     # 构建 + 启动 + 健康检查，失败自动回滚
+```
+
+看到 `发布成功 ✅` 就好了。打开 `http://<服务器IP>:<HTTP_PORT>/`。
+
+`deploy.sh` 做的事：校验 `.env`（拦住没改的占位密码）→ 校验 Nginx 配置 → 按 git 短 SHA 打镜像标签 → 构建启动 → 轮询接口做健康检查 → 不通过就自动回滚到上一版本并打印日志。
+
+### 方式 B：本机构建镜像推到腾讯云 TCR（服务器不装 Maven）
+
+适合服务器配置低、或想统一在本地/CI 构建的场景：
+
+```bash
+# 本机（先登录腾讯云容器镜像服务，控制台开通「个人版」即可）
+docker login ccr.ccs.tencentyun.com
+TAG=$(git rev-parse --short HEAD)
+docker build -t ccr.ccs.tencentyun.com/<命名空间>/picture-app:$TAG .
+docker push ccr.ccs.tencentyun.com/<命名空间>/picture-app:$TAG
+```
+
+服务器上的 `deploy/docker-compose.yml` 把 `app.build` 换成：
+
+```yaml
+  app:
+    image: ccr.ccs.tencentyun.com/<命名空间>/picture-app:${PICTURE_TAG}
+    # 删掉 build 段
+```
+
+再 `PICTURE_TAG=<你的tag> docker compose --env-file deploy/.env up -d`。
+
+> 镜像标签用 git SHA、不用 `latest`，是回滚能落地的前提 —— `deploy.sh` 也是这么做的。
+
+### 方式 C：宝塔 / 1Panel 面板
+
+面板里装 Docker → 上传代码 → 用 Compose 模板粘贴 `deploy/docker-compose.yml`。可视化但多一层黑盒，**排障时不如命令行清楚**，出问题仍要会看 `docker compose logs`。
+
+## 6.7 加域名 + HTTPS（腾讯云免费证书）
+
+1. 域名解析：在 DNSPod 加一条 A 记录指向服务器公网 IP
+2. 腾讯云控制台 → **SSL 证书** → 申请**免费证书**（一个域名一份，有效期 1 年）→ 签下来后下载 **Nginx 格式**，得到 `xxx_bundle.crt` 和 `xxx.key`
+3. 传到服务器并收紧权限：
+
+```bash
+sudo mkdir -p /etc/nginx/ssl && cd /etc/nginx/ssl
+sudo vi picture.example.com_bundle.crt   # 粘贴 crt 内容
+sudo vi picture.example.com.key          # 粘贴 key 内容
+sudo chmod 600 *.key
+```
+
+4. 改 `deploy/nginx/https.conf` 里的 `server_name` 与证书文件名（两处）
+5. 用 override 文件叠加启动：
+
+```bash
+cd /root/picture
+docker compose --env-file deploy/.env \
+  -f deploy/docker-compose.yml \
+  -f deploy/docker-compose.https.yml up -d
+```
+
+6. 安全组放行 443，访问 `https://picture.example.com` 验证证书生效
+
+> 免费证书**到期不会自动续**，在日历上加个提前 15 天的提醒；或者改用 `acme.sh` 自动续期。
+> `https.conf` 里的 HSTS 头默认注释掉了，确认 HTTPS 长期稳定后再开。
+
+## 6.8 发布验收清单（每次上线都走一遍）
+
+```bash
+# 1. 四个容器都在 Up
+docker compose --env-file deploy/.env -f deploy/docker-compose.yml ps
+
+# 2. 后端健康（未登录会返回 code 40100，能拿到 JSON 就说明接口通了）
+curl -s http://127.0.0.1:${HTTP_PORT}/api/user/get/login
+
+# 3. 前端配置替换真的生效了（这是最容易静默失败的一处）
+curl -s http://127.0.0.1:${HTTP_PORT}/config.js | grep __API_BASE__
+#   期望看到：window.__API_BASE__ = '/api';      ← 如果是空字符串，说明 sub_filter 没生效
+
+# 4. 页面能开、图片能出、能登录、能上传、按颜色能查到图、空间分析能出图
+```
+
+第 3 步是最值得记住的一条：**页面能打开 ≠ 配置正确**。`sub_filter` 没生效时页面照常显示，但所有接口请求都发到了访问者自己电脑的 `localhost`，只有打开浏览器 Network 面板才看得出来。
+
+## 6.9 排障清单
+
+| 现象 | 原因 | 处理 |
+| --- | --- | --- |
+| 首页图片全部空白，接口 500，日志报 `Unknown column 'picColor'` | 库是早期版本，缺主色调字段 | `docker exec -i picture-mysql mysql -uroot -p picture < deploy/mysql/migration-add-picture-color.sql` |
+| 页面能开，但接口请求发到了 `localhost:8666` | Nginx `sub_filter` 未生效（缺 `sub_filter_types`） | 已修复；确认容器里是新配置：`docker compose exec front nginx -T \| grep sub_filter_types` |
+| 同样地，缺 `thumbnailUrl` 字段报错 | 早期版本没有缩略图字段 | `docker exec -i picture-mysql mysql -uroot -p picture < deploy/mysql/migration-add-thumbnail.sql` |
+| 后端起不来，日志有 COS 相关异常 | `.env` 里 COS 参数没填全 | 5 个 `COS_*` 一个都不能少，`deploy.sh` 会提前拦住 |
+| 上传报 413 | Nginx 或后端体积限制太小 | Nginx `client_max_body_size 20m`，后端 `max-file-size/max-request-size 10MB`，改要同时改 |
+| 磁盘很快满 | 容器日志无限制 | 已加 `logging` 轮转（单文件 10m、留 3 个） |
+| `IP:8080` 能开、域名打不开 | 未备案却被运营商拦 80/443 | 走备案，或继续用非标端口 |
+| 改了表结构但不生效 | `init.sql` 只在数据卷为空时执行一次 | 用 `deploy/mysql/migration-*.sql` 手工执行 |
+| 容器一直重启，`ps` 看不到 Up | 配置错误导致进程退出 | `docker compose logs --tail=100 <服务名>` |
+
+## 6.10 日常运维与回滚
+
+```bash
+cd /root/picture
+
+# 发布 / 更新（会自动健康检查 + 失败回滚）
+git pull && bash deploy/deploy.sh
+
+# 看日志
+docker compose --env-file deploy/.env -f deploy/docker-compose.yml logs -f app
+
+# 手工回滚到某个版本（把一个旧 tag 顶回当前 tag 名即可）
+docker images | grep picture-app
+docker tag picture-app:<旧tag> picture-app:$(git rev-parse --short HEAD)
+docker compose --env-file deploy/.env -f deploy/docker-compose.yml up -d app
+
+# 备份数据库（建议加 crontab）
+echo '0 3 * * * cd /root/picture && bash deploy/backup.sh >> /var/log/picture-backup.log 2>&1' | sudo tee -a /etc/crontab
+```
+
+备份只覆盖数据库。**图片本体在 COS 上**，建议在 COS 控制台开启**版本控制**，防止误删无法恢复。
+
+## 6.11 加固清单（按性价比排序）
+
+1. **COS 用子账号最小权限密钥**（见 6.5）—— 收益最大，成本最低
+2. **SSH 禁密码登录、改非 22 端口、只允许密钥**：
+   ```bash
+   # 本机生成密钥后 ssh-copy-id，再改 /etc/ssh/sshd_config：
+   # PermitRootLogin prohibit-password
+   # PasswordAuthentication no
+   sudo systemctl restart ssh
+   ```
+3. **安全组只放行必要端口**，MySQL/Redis/后端端口不对公网开放
+4. 开启**腾讯云免费的主机安全（云镜）**做基础入侵检测
+5. 开启 **COS 版本控制**；数据库备份保留 7 天以上并考虑异地副本
+6. 数据库不要用 root 跑应用：改好 `deploy/mysql/create-app-user.sql` 里的密码并执行它，然后在 `.env` 里设 `MYSQL_USERNAME=picture_app` 与 `MYSQL_PASSWORD=<该密码>`，让应用只拿到 `picture` 库的增删改查权限
+7. 配置**云监控告警**：CPU 持续 >80%、内存 >85%、磁盘 >85%、带宽跑满 —— 这四个是最容易先炸的
+8. 打开 `apt` 自动安全更新：`sudo apt install -y unattended-upgrades && sudo dpkg-reconfigure -plow unattended-upgrades`

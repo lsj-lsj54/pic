@@ -9,6 +9,7 @@
 import { spaceApi, spaceAnalyzeApi } from '../api.js';
 import {
   $, $$, toast, escapeHtml, formatSize, renderEmpty, state,
+  revealOnScroll, attachRippleAll,
 } from '../ui.js';
 
 /** 图表主色板，与站点主题保持一致观感 */
@@ -393,33 +394,33 @@ export default {
       </section>
       <div id="analyze-body">
         <section class="chart-grid">
-          <div class="chart-card">
+          <div class="chart-card reveal">
             <h3 class="chart-title">资源用量 · 容量</h3>
             <div id="usage-size-box" class="chart-box chart-box-gauge"></div>
           </div>
-          <div class="chart-card">
+          <div class="chart-card reveal">
             <h3 class="chart-title">资源用量 · 数量</h3>
             <div id="usage-count-box" class="chart-box chart-box-gauge"></div>
           </div>
         </section>
         <section class="chart-grid chart-grid-wide">
-          <div class="chart-card chart-card-wide">
+          <div class="chart-card chart-card-wide reveal">
             <h3 class="chart-title">图片分类分布</h3>
             <div id="category-box" class="chart-box"></div>
           </div>
         </section>
         <section class="chart-grid">
-          <div class="chart-card">
+          <div class="chart-card reveal">
             <h3 class="chart-title">标签词云</h3>
             <div id="tag-box" class="chart-box"></div>
           </div>
-          <div class="chart-card">
+          <div class="chart-card reveal">
             <h3 class="chart-title">图片大小分布</h3>
             <div id="size-box" class="chart-box"></div>
           </div>
         </section>
         <section class="chart-grid chart-grid-wide">
-          <div class="chart-card chart-card-wide">
+          <div class="chart-card chart-card-wide reveal">
             <h3 class="chart-title">
               上传行为趋势
               <span class="dimension-switch" id="dimension-switch">
@@ -433,12 +434,15 @@ export default {
           </div>
         </section>
         <section class="chart-grid chart-grid-wide">
-          <div class="chart-card chart-card-wide" id="rank-card" hidden>
+          <div class="chart-card chart-card-wide reveal" id="rank-card" hidden>
             <h3 class="chart-title">空间使用排行（Top 10）</h3>
             <div id="rank-box" class="chart-box chart-box-trend"></div>
           </div>
         </section>
       </div>`;
+
+    revealOnScroll(el);
+    attachRippleAll(el);
 
     if (!hasEcharts()) {
       $('#analyze-body', el).innerHTML = renderEmpty('图表组件（ECharts）未加载，请检查网络或 lib 目录');

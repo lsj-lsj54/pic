@@ -2,7 +2,7 @@
  * 应用入口：登录态管理 + 视图路由
  */
 import { userApi, setNotLoginHandler } from './api.js';
-import { state, $, $$, toast, escapeHtml } from './ui.js';
+import { state, $, $$, toast, escapeHtml, renderSkeleton } from './ui.js';
 
 /** 路由表，hash 的 path 对应一个懒加载视图 */
 const routes = [
@@ -150,7 +150,8 @@ async function resolveRoute() {
 
   renderShell(route.layout);
   const viewEl = $('#view');
-  viewEl.innerHTML = '<div class="loading">加载中…</div>';
+  // 路由切换时先铺一层骨架屏，避免「白屏 → 内容突然出现」的割裂感
+  viewEl.innerHTML = renderSkeleton(6);
 
   const module = await route.view();
   currentView = module.default;

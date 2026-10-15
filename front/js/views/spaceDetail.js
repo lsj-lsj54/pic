@@ -7,8 +7,10 @@ import { spaceApi, pictureApi } from '../api.js';
 import {
   $, $$, toast, escapeHtml, formatTime, formatSize, renderPager, renderEmpty,
   confirmDialog, REVIEW_STATUS, spaceLevelInfo, renderSpaceUsage, normalizePage,
+  renderSkeleton, revealOnScroll, bindImageFade, attachRippleAll, attachRipple,
 } from '../ui.js';
 import { openPictureDetail, openEditModal, openUploadModal, thumbUrl } from '../components/picture.js';
+import { openLightbox } from '../components/lightbox.js';
 import { navigate } from '../app.js';
 
 /** 每页数量，后端限制不能超过 20 */
@@ -53,7 +55,7 @@ async function loadSpace(el) {
 /** 加载空间内的图片 */
 async function loadPictures(el) {
   const grid = $('#grid', el);
-  grid.innerHTML = '<div class="loading">加载中…</div>';
+  grid.innerHTML = renderSkeleton(PAGE_SIZE);
   try {
     const data = await pictureApi.listVOByPage({ ...query, spaceId: currentSpace.id });
     renderGrid(el, normalizePage(data));
@@ -98,9 +100,9 @@ function renderGrid(el, page) {
   grid.innerHTML = records.map((item) => {
     const review = REVIEW_STATUS[item.reviewStatus] || { text: '未知', cls: 'tag-pending' };
     return `
-      <article class="card" data-id="${item.id}">
+      <article class="card reveal" data-id="${item.id}">
         <div class="card-img">
-          <img src="${escapeHtml(thumbUrl(item))}" alt="${escapeHtml(item.name)}" loading="lazy">
+          <img src="${escapeHtml(thumbUrl(item))}" alt="${escapeHtml(item.name)}" loading="lazy" data-fade>
           <span class="card-badge ${review.cls}">${review.text}</span>
         </div>
         <div class="card-body">
@@ -169,6 +171,20 @@ function renderGrid(el, page) {
       loadPictures(el);
     });
   });
+
+  // 点击缩略图全屏查看
+  $$('.card-img', grid).forEach((imgBox) => {
+    imgBox.addEventListener('click', () => {
+      const id = imgBox.closest('.card').dataset.id;
+      const index = records.findIndex((item) => String(item.id) === String(id));
+      openLightbox({ pictures: records, index: index < 0 ? 0 : index });
+    });
+  });
+
+  bindImageFade(grid);
+  revealOnScroll(grid);
+  attachRippleAll(grid);
+  $$('[data-action]', grid).forEach(attachRipple);
 }
 
 export default {

@@ -1,21 +1,68 @@
 /* ==========================================================================
    云图库前端样式
-   简洁风格：浅色背景 + 卡片 + 少量圆角与阴影
+   设计方向：冷调编辑部画廊 —— 中性偏冷的灰阶、精密字阶、克制但有层级的阴影、
+   图片优先的观看体验；动效统一用指数缓动，不做回弹。
    ========================================================================== */
 
 :root {
+  /* ---------- 品牌与语义色 ---------- */
   --primary: #2f6fed;
   --primary-hover: #2559c9;
+  --primary-weak: #eef3fe;
+  --primary-ring: rgba(47, 111, 237, 0.16);
   --danger: #e5484d;
   --danger-hover: #c93a3f;
+  --danger-weak: #fdf2f2;
+  --success: #16a34a;
+  --success-weak: #e7f6ec;
+  --warning: #d97706;
+  --warning-weak: #fef3e2;
+
+  /* ---------- 文本与背景（中性色偏冷，避免纯黑纯白） ---------- */
   --text: #1f2933;
   --text-sub: #6b7280;
+  --text-weak: #9aa3af;
   --border: #e5e7eb;
+  --border-strong: #d3d8e0;
   --bg: #f6f7f9;
   --card-bg: #ffffff;
+  --surface-sunken: #f2f3f5;
+  --surface-hover: #f7f8fa;
+
+  /* ---------- 圆角阶梯 ---------- */
+  --radius-sm: 7px;
   --radius: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+  --radius-pill: 999px;
+
+  /* ---------- 阴影层级（多层叠加模拟真实光照，越靠上越大） ---------- */
+  --shadow-xs: 0 1px 2px rgba(16, 24, 40, 0.05);
   --shadow: 0 1px 3px rgba(16, 24, 40, 0.06), 0 1px 2px rgba(16, 24, 40, 0.04);
+  --shadow-md: 0 4px 12px rgba(16, 24, 40, 0.08), 0 1px 3px rgba(16, 24, 40, 0.04);
   --shadow-lg: 0 12px 32px rgba(16, 24, 40, 0.14);
+  --shadow-xl: 0 24px 64px rgba(16, 24, 40, 0.22);
+
+  /* ---------- 动效：指数缓动（ease-out-quart / expo），不用回弹 ---------- */
+  --dur-1: 120ms;
+  --dur-2: 200ms;
+  --dur-3: 320ms;
+  --dur-4: 520ms;
+  --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+
+  /* ---------- 排版 ---------- */
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+    'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+
+  /* ---------- 层级与尺寸 ---------- */
+  --header-h: 58px;
+  --z-header: 20;
+  --z-modal: 50;
+  --z-toast: 80;
+  --z-lightbox: 90;
 }
 
 * {
@@ -24,12 +71,13 @@
 
 body {
   margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
-    'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  font-family: var(--font-sans);
   font-size: 14px;
   color: var(--text);
   background: var(--bg);
   line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 a {
@@ -1375,4 +1423,828 @@ h1, h2, h3 {
   .chart-grid {
     grid-template-columns: 1fr;
   }
+}
+
+/* ==========================================================================
+   交互与动效基元
+   ========================================================================== */
+
+/* 键盘可达性：统一焦点环（鼠标点击不显示，键盘导航显示） */
+:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* 输入类控件已有 box-shadow 焦点环，避免出现双环 */
+.input:focus-visible,
+.field input:focus-visible,
+.field textarea:focus-visible,
+.field select:focus-visible {
+  outline: none;
+}
+
+/* 顶栏毛玻璃：滚动时内容从下方掠过，层次更清晰 */
+.header {
+  background: rgba(255, 255, 255, 0.86);
+  backdrop-filter: saturate(1.4) blur(10px);
+  -webkit-backdrop-filter: saturate(1.4) blur(10px);
+}
+
+/* 滚动条：跟随整体冷灰调，不抢视觉 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #cbd2dc transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: #cbd2dc;
+  border: 3px solid transparent;
+  background-clip: content-box;
+  border-radius: 999px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: #aab3c0;
+  background-clip: content-box;
+}
+
+/* 数字用等宽字形，体积/尺寸/页码对齐不跳动 */
+.card-meta,
+.pager-info,
+.usage-row b,
+.detail-row p,
+.lb-counter,
+.lb-zoom,
+.toast-message {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ------------------------------ 渐入（滚动触发） ------------------------------ */
+
+.reveal {
+  opacity: 0;
+  transform: translateY(14px);
+  will-change: opacity, transform;
+}
+
+.reveal.is-in {
+  opacity: 1;
+  transform: none;
+  transition:
+    opacity var(--dur-4) var(--ease-out-expo) var(--reveal-delay, 0ms),
+    transform var(--dur-4) var(--ease-out-expo) var(--reveal-delay, 0ms);
+}
+
+/* ------------------------------ 骨架屏 ------------------------------ */
+
+.skeleton-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 16px;
+  grid-column: 1 / -1;
+}
+
+.skeleton-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  box-shadow: var(--shadow-xs);
+}
+
+.skeleton-card .sk-img {
+  height: 170px;
+}
+
+.skeleton-card .sk-body {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.sk {
+  position: relative;
+  overflow: hidden;
+  background: #eef0f3;
+  border-radius: 6px;
+  height: 12px;
+}
+
+.sk-title {
+  height: 15px;
+  width: 62%;
+}
+
+.sk-text {
+  width: 100%;
+}
+
+.sk-text-short {
+  width: 74%;
+}
+
+.sk::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.78), transparent);
+  animation: sk-shimmer 1.3s var(--ease-in-out) infinite;
+}
+
+@keyframes sk-shimmer {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+/* ------------------------------ 按钮涟漪 ------------------------------ */
+
+.ripple-host {
+  position: relative;
+  overflow: hidden;
+}
+
+.ripple-ink {
+  position: absolute;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.26;
+  transform: scale(0);
+  pointer-events: none;
+  animation: ripple-expand 560ms var(--ease-out-quart) forwards;
+}
+
+@keyframes ripple-expand {
+  to {
+    transform: scale(1);
+    opacity: 0;
+  }
+}
+
+/* 按钮按压反馈与主按钮光泽 */
+.btn {
+  transition:
+    background var(--dur-1) var(--ease-out-quart),
+    border-color var(--dur-1) var(--ease-out-quart),
+    color var(--dur-1) var(--ease-out-quart),
+    box-shadow var(--dur-2) var(--ease-out-quart),
+    transform var(--dur-1) var(--ease-out-quart);
+}
+
+.btn:active:not(:disabled) {
+  transform: translateY(1px) scale(0.995);
+}
+
+.btn-primary {
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0));
+  box-shadow: 0 1px 2px rgba(47, 111, 237, 0.32);
+}
+
+.btn-primary:hover:not(:disabled) {
+  box-shadow: 0 4px 14px rgba(47, 111, 237, 0.32);
+}
+
+.btn:focus-visible {
+  box-shadow: 0 0 0 4px var(--primary-ring);
+  border-color: var(--primary);
+}
+
+.input:hover:not(:disabled),
+.field input:hover,
+.field textarea:hover,
+.field select:hover {
+  border-color: var(--border-strong);
+}
+
+/* ------------------------------ 卡片：悬停遮罩与快速操作 ------------------------------ */
+
+.card {
+  transition:
+    box-shadow var(--dur-2) var(--ease-out-quart),
+    transform var(--dur-2) var(--ease-out-quart),
+    border-color var(--dur-2) var(--ease-out-quart);
+}
+
+.card:hover {
+  transform: translateY(-3px);
+  border-color: var(--border-strong);
+}
+
+/* 悬停时自下而上的暗色渐变，让图片有「聚光灯」感 */
+.card-img::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to top, rgba(12, 16, 22, 0.62), rgba(12, 16, 22, 0) 58%);
+  opacity: 0;
+  transition: opacity var(--dur-3) var(--ease-out-quart);
+  pointer-events: none;
+}
+
+.card:hover .card-img::after,
+.card:focus-within .card-img::after {
+  opacity: 1;
+}
+
+/* 图片淡入：由 JS 打标记，未标记时保持可见，避免任何情况下「图片不显示」 */
+.card-img img {
+  transition: transform var(--dur-3) var(--ease-out-quart), opacity var(--dur-4) ease;
+}
+
+.card-img img[data-fade] {
+  opacity: 0;
+}
+
+.card-img img[data-fade].is-loaded {
+  opacity: 1;
+}
+
+.card:hover .card-img img {
+  transform: scale(1.045);
+}
+
+/* 快速操作：悬停或键盘聚焦时浮现 */
+.card-quick {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: 10px;
+  z-index: 2;
+  display: flex;
+  gap: 8px;
+  opacity: 0;
+  transform: translateY(10px);
+  transition:
+    opacity var(--dur-3) var(--ease-out-expo),
+    transform var(--dur-3) var(--ease-out-expo);
+}
+
+.card:hover .card-quick,
+.card:focus-within .card-quick {
+  opacity: 1;
+  transform: none;
+}
+
+.card-quick .btn {
+  height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
+  border-color: transparent;
+  background: rgba(255, 255, 255, 0.94);
+  color: var(--text);
+  backdrop-filter: blur(6px);
+  box-shadow: var(--shadow-xs);
+}
+
+.card-quick .btn:hover {
+  background: #fff;
+  border-color: transparent;
+}
+
+/* 图片区可放大提示 */
+.card-img {
+  cursor: zoom-in;
+}
+
+/* 空间卡片与表格行：统一缓动 */
+.space-card,
+.table tbody tr {
+  transition:
+    background var(--dur-2) var(--ease-out-quart),
+    box-shadow var(--dur-2) var(--ease-out-quart),
+    transform var(--dur-2) var(--ease-out-quart);
+}
+
+.space-card:hover {
+  transform: translateY(-3px);
+}
+
+/* ------------------------------ 弹窗：入场动效与层级 ------------------------------ */
+
+.modal-mask {
+  background: rgba(16, 24, 40, 0.42);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+  animation: mask-in var(--dur-2) var(--ease-out-quart);
+}
+
+.modal {
+  box-shadow: var(--shadow-xl);
+  animation: modal-in var(--dur-3) var(--ease-out-expo);
+}
+
+.modal-mask.is-closing {
+  animation: mask-out var(--dur-2) var(--ease-out-quart) forwards;
+}
+
+.modal-mask.is-closing .modal {
+  animation: modal-out var(--dur-2) var(--ease-out-quart) forwards;
+}
+
+@keyframes mask-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes mask-out {
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes modal-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.97);
+  }
+}
+
+@keyframes modal-out {
+  to {
+    opacity: 0;
+    transform: translateY(8px) scale(0.985);
+  }
+}
+
+/* 弹窗打开时锁住页面滚动，避免背景跟着滚 */
+body.no-scroll {
+  overflow: hidden;
+}
+
+/* ------------------------------ 轻提示：堆叠 ------------------------------ */
+
+#toast-root {
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.toast {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(560px, calc(100vw - 32px));
+  padding: 9px 14px;
+  overflow: hidden;
+  border-radius: var(--radius);
+  background: rgba(31, 41, 51, 0.94);
+  backdrop-filter: blur(6px);
+  pointer-events: auto;
+  animation: toast-in var(--dur-3) var(--ease-out-expo);
+}
+
+.toast.is-leaving {
+  animation: toast-out var(--dur-2) var(--ease-out-quart) forwards;
+}
+
+.toast-icon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.22);
+  font-size: 11px;
+  line-height: 1;
+}
+
+.toast-bar {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 2px;
+  width: 100%;
+  transform-origin: left center;
+  background: rgba(255, 255, 255, 0.5);
+  animation: toast-bar linear forwards;
+  animation-duration: var(--toast-duration, 2600ms);
+}
+
+@keyframes toast-out {
+  to {
+    opacity: 0;
+    transform: translateY(-10px) scale(0.97);
+  }
+}
+
+@keyframes toast-bar {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
+}
+
+/* ------------------------------ 上传：进度环与状态动画 ------------------------------ */
+
+.upload-ring {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.upload-ring svg {
+  position: absolute;
+  inset: 0;
+  transform: rotate(-90deg);
+}
+
+.upload-ring circle {
+  fill: none;
+  stroke-width: 3.5;
+}
+
+.upload-ring .ring-bg {
+  stroke: #e9ecf1;
+}
+
+.upload-ring .ring-fg {
+  stroke: var(--primary);
+  stroke-linecap: round;
+  transition: stroke-dashoffset var(--dur-3) var(--ease-out-quart), stroke var(--dur-2) ease;
+}
+
+/* 拿不到真实上传进度时用旋转弧表示「进行中」 */
+.upload-ring.is-indeterminate .ring-fg {
+  stroke-dasharray: 44 96;
+  animation: ring-sweep 1.15s linear infinite;
+  transform-origin: center;
+}
+
+.upload-ring.is-done .ring-fg {
+  stroke: var(--success);
+}
+
+@keyframes ring-sweep {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* 已完成的小勾：轻弹出，不夸张 */
+.upload-check {
+  font-size: 15px;
+  color: var(--success);
+  animation: check-pop var(--dur-3) var(--ease-out-expo);
+}
+
+@keyframes check-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.4);
+  }
+}
+
+.upload-item {
+  animation: item-in var(--dur-3) var(--ease-out-expo);
+  transition: border-color var(--dur-2) var(--ease-out-quart), background var(--dur-2) var(--ease-out-quart);
+}
+
+.upload-item.is-done {
+  border-color: #bfe6cd;
+  background: #f6fcf8;
+}
+
+.upload-item.is-failed {
+  border-color: #f3c6c8;
+  background: #fef8f8;
+}
+
+@keyframes item-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+/* 拖拽时：虚线动起来，且有整块高亮 */
+.upload-box {
+  transition:
+    border-color var(--dur-2) var(--ease-out-quart),
+    background var(--dur-2) var(--ease-out-quart),
+    transform var(--dur-2) var(--ease-out-quart);
+}
+
+.upload-box.dragging {
+  transform: scale(1.01);
+  border-style: solid;
+  box-shadow: 0 0 0 4px var(--primary-ring);
+}
+
+/* ------------------------------ 图片详情：可放大提示 ------------------------------ */
+
+.detail-img {
+  position: relative;
+  cursor: zoom-in;
+}
+
+.detail-img::after {
+  content: '点击放大 · 支持缩放';
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  padding: 3px 9px;
+  border-radius: var(--radius-pill);
+  background: rgba(12, 16, 22, 0.66);
+  color: #fff;
+  font-size: 12px;
+  opacity: 0;
+  transition: opacity var(--dur-3) var(--ease-out-quart);
+  pointer-events: none;
+}
+
+.detail-img:hover::after {
+  opacity: 1;
+}
+
+/* ------------------------------ 全屏查看器（Lightbox） ------------------------------ */
+
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-lightbox);
+  display: flex;
+  flex-direction: column;
+  background: rgba(10, 13, 18, 0.94);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  color: #f3f5f8;
+  animation: lb-in var(--dur-3) var(--ease-out-expo);
+}
+
+.lightbox.is-closing {
+  animation: lb-out var(--dur-2) var(--ease-out-quart) forwards;
+}
+
+@keyframes lb-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes lb-out {
+  to {
+    opacity: 0;
+  }
+}
+
+.lb-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.lb-title {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.lb-title-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lb-counter {
+  flex: none;
+  font-size: 12px;
+  font-weight: 400;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.lb-tools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+
+.lb-btn {
+  height: 30px;
+  min-width: 30px;
+  padding: 0 9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.06);
+  color: #f3f5f8;
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background var(--dur-1) var(--ease-out-quart), border-color var(--dur-1) var(--ease-out-quart);
+}
+
+.lb-btn:hover {
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.28);
+}
+
+.lb-btn:active {
+  transform: translateY(1px);
+}
+
+.lb-zoom {
+  min-width: 52px;
+  text-align: center;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.lb-stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  /* 拖拽平移时不要触发浏览器的图片拖拽 */
+  touch-action: none;
+}
+
+.lb-img {
+  max-width: 100%;
+  max-height: 100%;
+  user-select: none;
+  -webkit-user-drag: none;
+  transition: opacity var(--dur-3) var(--ease-out-quart);
+  will-change: transform;
+}
+
+.lb-img.is-grabbing {
+  cursor: grabbing;
+}
+
+.lb-stage.is-zoomed .lb-img {
+  cursor: grab;
+}
+
+.lb-img.is-loading {
+  opacity: 0;
+}
+
+.lb-spinner {
+  position: absolute;
+  width: 30px;
+  height: 30px;
+  border: 2.5px solid rgba(255, 255, 255, 0.22);
+  border-top-color: rgba(255, 255, 255, 0.85);
+  border-radius: 50%;
+  animation: lb-spin 720ms linear infinite;
+}
+
+.lb-spinner[hidden] {
+  display: none;
+}
+
+@keyframes lb-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.lb-nav {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 44px;
+  height: 74px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.07);
+  color: #fff;
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background var(--dur-2) var(--ease-out-quart), opacity var(--dur-2) ease;
+}
+
+.lb-nav:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.lb-nav[disabled] {
+  opacity: 0.22;
+  cursor: not-allowed;
+}
+
+.lb-prev {
+  left: 14px;
+}
+
+.lb-next {
+  right: 14px;
+}
+
+.lb-foot {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 16px 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.lb-meta {
+  flex: none;
+  max-width: 320px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.66);
+  line-height: 1.5;
+}
+
+.lb-strip {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.lb-thumb {
+  flex: none;
+  width: 52px;
+  height: 52px;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.08);
+  cursor: pointer;
+  opacity: 0.6;
+  transition: opacity var(--dur-2) ease, border-color var(--dur-2) ease, transform var(--dur-2) var(--ease-out-quart);
+}
+
+.lb-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.lb-thumb:hover {
+  opacity: 1;
+  transform: translateY(-2px);
+}
+
+.lb-thumb.is-active {
+  opacity: 1;
+  border-color: #fff;
+}
+
+.lb-hint {
+  flex: none;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+/* ------------------------------ 无障碍：尊重系统的减弱动效偏好 ------------------------------ */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .reveal {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* 审核角标要浮在悬停遮罩之上（遮罩是 ::after，绘制顺序在子元素之后） */
+.card-badge {
+  z-index: 3;
 }

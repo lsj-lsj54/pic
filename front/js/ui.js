@@ -79,24 +79,113 @@ export function spaceLevelInfo(level) {
 
 /* ------------------------------ 轻提示 ------------------------------ */
 
-let toastTimer = null;
+/** 各类型提示的图标，纯装饰（对读屏隐藏，语义靠 role 传达） */
+const TOAST_ICON = { success: '✓', error: '!', info: 'i' };
+
+/** 单条提示的存活时长（毫秒） */
+const TOAST_DURATION = 2800;
+
+/** 同时最多显示几条，超出时挤掉最早的 */
+const TOAST_MAX = 4;
+
+/** 安全移除节点：兼容没有 Element.remove 的环境 */
+function detach(el) {
+  if (!el) {
+    return;
+  }
+  try {
+    if (typeof el.remove === 'function') {
+      el.remove();
+      return;
+    }
+    if (el.parentNode) {
+      el.parentNode.removeChild(el);
+    }
+  } catch (e) {
+    /* 忽略：移除失败不影响主流程 */
+  }
+}
 
 /**
- * 弹出轻提示
+ * 弹出轻提示（支持多条堆叠）
  *
  * @param {string} message 提示内容
  * @param {string} type    success | error | info
  */
 export function toast(message, type = 'info') {
   const root = $('#toast-root');
-  root.innerHTML = `<div class="toast toast-${type}">${escapeHtml(message)}</div>`;
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => {
-    root.innerHTML = '';
-  }, 2600);
+  if (!root) {
+    return;
+  }
+  const el = document.createElement('div');
+  el.className = `toast toast-${type}`;
+  // 错误用 alert（读屏会立即打断播报），其余用 status
+  el.setAttribute('role', type === 'error' ? 'alert' : 'status');
+  if (el.style && typeof el.style.setProperty === 'function') {
+    el.style.setProperty('--toast-duration', `${TOAST_DURATION}ms`);
+  }
+  el.innerHTML = `
+    <span class="toast-icon" aria-hidden="true">${TOAST_ICON[type] || TOAST_ICON.info}</span>
+    <span class="toast-message">${escapeHtml(message)}</span>
+    <i class="toast-bar" aria-hidden="true"></i>`;
+
+  let closed = false;
+  const close = () => {
+    if (closed) {
+      return;
+    }
+    closed = true;
+    el.classList.add('is-leaving');
+    setTimeout(() => detach(el), 220);
+  };
+
+  // 点击可提前关闭（错误信息常常需要手动清掉）
+  el.addEventListener('click', close);
+  el.title = '点击关闭';
+
+  root.appendChild(el);
+  while (root.children.length > TOAST_MAX) {
+    detach(root.children[0]);
+  }
+  setTimeout(close, TOAST_DURATION);
+}
+
+/* ------------------------------ 滚动锁定 ------------------------------ */
+
+/** 锁页面滚动（弹窗 / 查看器打开时用，避免背景跟着滚） */
+function lockScroll() {
+  const body = document.body;
+  if (body && body.classList) {
+    body.classList.add('no-scroll');
+  }
+}
+
+/** 解锁滚动：仍有弹窗或查看器时不解除 */
+function unlockScroll() {
+  if ($('.modal-mask') || $('.lightbox')) {
+    return;
+  }
+  const body = document.body;
+  if (body && body.classList) {
+    body.classList.remove('no-scroll');
+  }
 }
 
 /* ------------------------------ 弹窗 ------------------------------ */
+
+/** 当前弹窗打开前的焦点元素，关闭后还回去（键盘用户的焦点不丢） */
+let modalLastFocus = null;
+
+/** 弹窗关闭的动画时长，与 CSS --dur-2 保持一致 */
+const MODAL_EXIT_MS = 200;
+
+/** 弹窗内可聚焦元素 */
+function focusableIn(root) {
+  return $$(
+    'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    root,
+  ).filter((el) => !el.hidden);
+}
 
 /**
  * 打开弹窗
@@ -109,9 +198,13 @@ export function toast(message, type = 'info') {
  */
 export function showModal({ title, content, width = '520px' }) {
   const root = $('#modal-root');
+  // 键盘焦点还原点：只在没有弹窗时记录，避免弹窗套弹窗时记错
+  if (!root.querySelector('.modal-mask')) {
+    modalLastFocus = document.activeElement || null;
+  }
   root.innerHTML = `
     <div class="modal-mask">
-      <div class="modal" style="width:${width}">
+      <div class="modal" role="dialog" aria-modal="true" aria-label="${escapeHtml(title)}" style="width:${width}">
         <div class="modal-head">
           <h3>${escapeHtml(title)}</h3>
           <button class="icon-btn" data-modal-close type="button" aria-label="关闭">✕</button>
@@ -120,6 +213,7 @@ export function showModal({ title, content, width = '520px' }) {
       </div>
     </div>`;
   const mask = $('.modal-mask', root);
+  const modal = $('.modal', root);
 
   // 点遮罩关闭，点弹窗内部不关闭
   mask.addEventListener('click', (e) => {
@@ -130,12 +224,79 @@ export function showModal({ title, content, width = '520px' }) {
   $$('[data-modal-close]', root).forEach((btn) => {
     btn.addEventListener('click', closeModal);
   });
-  return $('.modal', root);
+
+  // Esc 关闭 + Tab 焦点陷阱：键盘用户不会 tab 到背景页面
+  const onKeydown = (e) => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      closeModal();
+      return;
+    }
+    if (e.key !== 'Tab') {
+      return;
+    }
+    const items = focusableIn(modal);
+    if (items.length === 0) {
+      return;
+    }
+    const first = items[0];
+    const last = items[items.length - 1];
+    const active = document.activeElement;
+    if (e.shiftKey && (active === first || !modal.contains(active))) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && (active === last || !modal.contains(active))) {
+      e.preventDefault();
+      first.focus();
+    }
+  };
+  document.addEventListener('keydown', onKeydown, true);
+  modal._onKeydown = onKeydown;
+
+  lockScroll();
+  // 焦点移入弹窗，屏幕阅读器才会读到弹窗内容
+  const autoFocus = focusableIn(modal).find((el) => !el.hasAttribute('data-modal-close'));
+  if (autoFocus) {
+    autoFocus.focus();
+  } else {
+    modal.setAttribute('tabindex', '-1');
+    modal.focus();
+  }
+  return modal;
 }
 
-/** 关闭弹窗 */
+/**
+ * 关闭弹窗（带退场动画）
+ * <p>
+ * 只有「当前这一层」才允许清空容器，避免关闭旧弹窗的延时回调把刚打开的新弹窗抹掉。
+ */
 export function closeModal() {
-  $('#modal-root').innerHTML = '';
+  const root = $('#modal-root');
+  const mask = $('.modal-mask', root);
+  if (!mask) {
+    unlockScroll();
+    return;
+  }
+  const modal = $('.modal', mask);
+  if (modal && modal._onKeydown) {
+    document.removeEventListener('keydown', modal._onKeydown, true);
+  }
+  mask.classList.add('is-closing');
+  setTimeout(() => {
+    if ($('.modal-mask', root) === mask) {
+      root.innerHTML = '';
+      // 焦点还给打开弹窗的那个元素
+      if (modalLastFocus && typeof modalLastFocus.focus === 'function') {
+        try {
+          modalLastFocus.focus();
+        } catch (e) {
+          /* 元素可能已被移除，忽略 */
+        }
+      }
+      modalLastFocus = null;
+    }
+    unlockScroll();
+  }, MODAL_EXIT_MS);
 }
 
 /**
@@ -363,5 +524,151 @@ export function spaceLevelOptions(selected, onlyCommon = false) {
       const item = SPACE_LEVEL[level];
       return `<option value="${level}" ${level === Number(selected) ? 'selected' : ''}>${item.text}</option>`;
     })
+    .join('');
+}
+
+/* ------------------------------ 加载骨架 ------------------------------ */
+
+/**
+ * 骨架屏卡片占位
+ * <p>
+ * 列表加载期间铺一层与真实卡片同构的灰块，避免「一片空白 → 内容突然撑开」的
+ * 视觉抖动，比单纯的「加载中…」文字更接近真实观感。
+ *
+ * @param {number} count 占位卡片数量
+ * @returns {string} 骨架屏 HTML
+ */
+export function renderSkeleton(count = 8) {
+  const card = `
+    <div class="skeleton-card" aria-hidden="true">
+      <div class="sk sk-img"></div>
+      <div class="sk-body">
+        <div class="sk sk-title"></div>
+        <div class="sk sk-text"></div>
+        <div class="sk sk-text-short"></div>
+      </div>
+    </div>`;
+  const cards = new Array(Math.max(1, Math.min(count, 24))).fill(card).join('');
+  return `<div class="skeleton-grid" role="status" aria-label="加载中">${cards}</div>`;
+}
+
+/* ------------------------------ 入场动效 ------------------------------ */
+
+/**
+ * 元素滚动进入视口时渐入（错峰）
+ * <p>
+ * 环境不支持 IntersectionObserver 时直接全部显示，不做任何降级视觉损失。
+ *
+ * @param {HTMLElement} root           容器
+ * @param {object}      [options]
+ * @param {string}      [options.selector] 选择器，默认 .reveal
+ * @param {number}      [options.step]     每个元素的延迟步长（毫秒）
+ * @returns {Function} 取消观察的函数
+ */
+export function revealOnScroll(root, { selector = '.reveal', step = 45 } = {}) {
+  const items = $$(selector, root);
+  if (items.length === 0) {
+    return () => {};
+  }
+  items.forEach((el, index) => {
+    if (el.style && typeof el.style.setProperty === 'function') {
+      // 最多延迟 360ms，避免靠后的卡片等太久
+      el.style.setProperty('--reveal-delay', `${Math.min(index * step, 360)}ms`);
+    }
+  });
+  if (typeof IntersectionObserver === 'undefined') {
+    items.forEach((el) => el.classList.add('is-in'));
+    return () => {};
+  }
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach((entry) => {
+      if (entry.isIntersecting) {
+        entry.target.classList.add('is-in');
+        observer.unobserve(entry.target);
+      }
+    });
+  }, { rootMargin: '0px 0px -6% 0px', threshold: 0.04 });
+  items.forEach((el) => observer.observe(el));
+  return () => observer.disconnect();
+}
+
+/* ------------------------------ 图片淡入 ------------------------------ */
+
+/**
+ * 图片加载完成后再淡入
+ * <p>
+ * 只在 <img data-fade> 上生效，且加载失败也会显示出来：
+ * 宁可露占位背景，也不能因为加载事件缺失让图片整块消失。
+ *
+ * @param {HTMLElement} root 容器
+ */
+export function bindImageFade(root) {
+  $$('img[data-fade]', root).forEach((img) => {
+    const show = () => {
+      if (img.classList) {
+        img.classList.add('is-loaded');
+      }
+    };
+    if (img.complete) {
+      show();
+      return;
+    }
+    img.addEventListener('load', show, { once: true });
+    img.addEventListener('error', show, { once: true });
+  });
+}
+
+/* ------------------------------ 涟漪反馈 ------------------------------ */
+
+/**
+ * 给按钮加点击涟漪（从指针位置扩散）
+ *
+ * @param {HTMLElement} el 目标元素
+ */
+export function attachRipple(el) {
+  if (!el || el._rippleBound) {
+    return;
+  }
+  el._rippleBound = true;
+  if (el.classList) {
+    el.classList.add('ripple-host');
+  }
+  el.addEventListener('pointerdown', (e) => {
+    const rect = typeof el.getBoundingClientRect === 'function' ? el.getBoundingClientRect() : null;
+    if (!rect || !rect.width || typeof e.clientX !== 'number') {
+      return;
+    }
+    const size = Math.max(rect.width, rect.height) * 2;
+    const ink = document.createElement('span');
+    ink.className = 'ripple-ink';
+    ink.style.width = `${size}px`;
+    ink.style.height = `${size}px`;
+    ink.style.left = `${e.clientX - rect.left - size / 2}px`;
+    ink.style.top = `${e.clientY - rect.top - size / 2}px`;
+    el.appendChild(ink);
+    setTimeout(() => detach(ink), 620);
+  });
+}
+
+/**
+ * 批量为容器内的按钮加涟漪
+ *
+ * @param {HTMLElement} root 容器
+ */
+export function attachRippleAll(root) {
+  $$('.btn, .icon-btn, .lb-btn', root).forEach(attachRipple);
+}
+
+/**
+ * 表格骨架行（管理端列表加载时占位）
+ *
+ * @param {number} cols 列数，需与真实表格一致
+ * @param {number} rows 占位行数
+ * @returns {string} tbody 内的占位 HTML
+ */
+export function renderTableSkeleton(cols = 6, rows = 5) {
+  const cell = '<td><span class="sk" style="display:block;width:70%"></span></td>';
+  return new Array(Math.max(1, Math.min(rows, 20)))
+    .fill(`<tr class="skeleton-row" aria-hidden="true">${cell.repeat(Math.max(1, cols))}</tr>`)
     .join('');
 }

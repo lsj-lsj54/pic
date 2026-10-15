@@ -7,7 +7,13 @@
 --   1. create_table_picture.sql 用 ALTER TABLE 追加审核字段，重复执行会报 Duplicate column；
 --   2. 脚本里写死 `use picture`，容器初始化时容易因为库不存在而失败；
 --   3. 早期版本漏了 space 表与 picture.spaceId，空间功能会直接报 Unknown column。
--- 这里全部改成 CREATE TABLE IF NOT EXISTS，并把审核字段、空间字段直接放进建表语句。
+--   4. 早期版本漏了 picture.picColor 系列字段，实体已经声明了这些列，
+--      MyBatis-Plus 查询会 SELECT 出来，库里没有就会报 Unknown column，
+--      表现为「首页图片全部加载不出来、接口 500」。
+-- 这里全部改成 CREATE TABLE IF NOT EXISTS，并把审核字段、空间字段、主色调字段直接放进建表语句。
+--
+-- 已有数据库的增量升级见同目录：migration-add-thumbnail.sql、migration-add-picture-color.sql
+-- （init.sql 只在 MySQL 数据卷为空时执行一次，不会作用于已存在的库）。
 
 CREATE DATABASE IF NOT EXISTS `picture`
     DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
@@ -47,6 +53,10 @@ CREATE TABLE IF NOT EXISTS `picture`
     picHeight     int                                NULL COMMENT '图片高度',
     picScale      double                             NULL COMMENT '图片宽高比例',
     picFormat     varchar(32)                        NULL COMMENT '图片格式',
+    picColor      varchar(7)                         NULL COMMENT '主色调（腾讯云 imageAve 返回，形如 #736246）',
+    picColorR     tinyint unsigned                   NULL COMMENT '主色调 R 分量（0-255）',
+    picColorG     tinyint unsigned                   NULL COMMENT '主色调 G 分量（0-255）',
+    picColorB     tinyint unsigned                   NULL COMMENT '主色调 B 分量（0-255）',
     userId        bigint                             NOT NULL COMMENT '创建用户 id',
     spaceId       bigint                             NULL COMMENT '空间 id（为空表示公共空间）',
     reviewStatus  int      DEFAULT 0                 NOT NULL COMMENT '审核状态：0-待审核; 1-通过; 2-拒绝',

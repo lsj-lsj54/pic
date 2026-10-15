@@ -12,6 +12,12 @@ COPY pom.xml .
 RUN mvn -B dependency:go-offline -DskipTests || true
 
 COPY src ./src
+
+# 双保险：即使有人在本机（有 application-local.yml）构建镜像，
+# 也先把这个含真实密码与腾讯云密钥的文件删掉，避免被打进镜像层。
+# 生产环境的配置一律走环境变量注入（见 deploy/docker-compose.yml）。
+RUN rm -f src/main/resources/application-local.yml
+
 RUN mvn -B clean package -DskipTests
 
 # ---------- 运行阶段 ----------

@@ -3,8 +3,7 @@
  */
 import { userApi } from '../api.js';
 import {
-  $, $$, state, toast, escapeHtml, formatTime, debounce,
-  renderPager, renderEmpty, confirmDialog, showModal, closeModal, getFormValues, normalizePage,
+  $, $$, state, toast, escapeHtml, formatTime, debounce, renderPager, renderEmpty, confirmDialog, showModal, closeModal, getFormValues, normalizePage, renderTableSkeleton,
 } from '../ui.js';
 
 const PAGE_SIZE = 10;
@@ -21,7 +20,7 @@ const query = {
 /** 拉取用户分页数据 */
 async function load(el) {
   const tbody = $('#tbody', el);
-  tbody.innerHTML = '<tr><td colspan="6" class="loading">加载中…</td></tr>';
+  tbody.innerHTML = renderTableSkeleton(6, 5);
   try {
     const data = await userApi.listVOByPage({
       ...query,
