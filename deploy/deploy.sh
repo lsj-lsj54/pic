@@ -18,17 +18,65 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
 ENV_FILE="$SCRIPT_DIR/.env"
-COMPOSE_FILE="$SCRIPT_DIR/docker-compose.yml"
-NGINX_CONF="$SCRIPT_DIR/nginx/default.conf"
+
+# 部署模式：full（MySQL + Redis + 后端 + 前端）/ free（免 Redis 的低配编排，适合 1~2G 小机器）
+# 可用环境变量显式指定：DEPLOY_MODE=free bash deploy/deploy.sh
+# 不指定时按机器内存自动判断（小于 3G 走 free）。
+DEPLOY_MODE="${DEPLOY_MODE:-auto}"
+
+detect_total_mem_mb() {
+  if [ -r /proc/meminfo ]; then
+    awk '/MemTotal/ {printf "%d", $2/1024}' /proc/meminfo 2>/dev/null || echo 0
+  else
+    echo 0
+  fi
+}
+
+if [ "$DEPLOY_MODE" = "auto" ]; then
+  MEM_MB="$(detect_total_mem_mb)"
+  if [ "${MEM_MB:-0}" -gt 0 ] && [ "${MEM_MB:-0}" -lt 3000 ]; then
+    DEPLOY_MODE="free"
+  else
+    DEPLOY_MODE="full"
+  fi
+fi
+
+case "$DEPLOY_MODE" in
+  free)
+    COMPOSE_FILE="$SCRIPT_DIR/docker-compose.free.yml"
+    # 低配编排没有 Redis，前端必须用不打开缓存开关的 Nginx 配置
+    NGINX_CONF="$SCRIPT_DIR/nginx/default.no-cache.conf"
+    ;;
+  full)
+    COMPOSE_FILE="$SCRIPT_DIR/docker-compose.yml"
+    NGINX_CONF="$SCRIPT_DIR/nginx/default.conf"
+    ;;
+  *)
+    printf '\033[31m[错误]\033[0m DEPLOY_MODE 只能是 auto / free / full，当前是：%s\n' "$DEPLOY_MODE" >&2
+    exit 1
+    ;;
+esac
 
 log()  { printf '\033[36m[%s]\033[0m %s\n' "$(date '+%H:%M:%S')" "$*"; }
 warn() { printf '\033[33m[警告]\033[0m %s\n' "$*" >&2; }
 die()  { printf '\033[31m[错误]\033[0m %s\n' "$*" >&2; exit 1; }
 
+log "部署模式：$DEPLOY_MODE（编排 $(basename "$COMPOSE_FILE")，Nginx $(basename "$NGINX_CONF")）"
+if [ "$DEPLOY_MODE" = "full" ]; then
+  MEM_MB="$(detect_total_mem_mb)"
+  if [ "${MEM_MB:-0}" -gt 0 ] && [ "${MEM_MB:-0}" -lt 3000 ]; then
+    warn "机器只有约 ${MEM_MB}MB 内存，跑完整版（含 Redis）可能吃紧；"
+    warn "建议改用低配模式：DEPLOY_MODE=free bash deploy/deploy.sh"
+  fi
+fi
+
 compose() { docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" "$@"; }
 
 # ---------------------------------------------------------------- 1. 前置检查
-[ -f "$ENV_FILE" ] || die "缺少 $ENV_FILE。先执行：cp deploy/.env.example deploy/.env 并填好真实值"
+[ -f "$ENV_FILE" ] || die "缺少 $ENV_FILE。
+  本机生成（会自动读 application-local.yml 里的 COS 参数 + 随机生成密码）：
+     bash deploy/make-env.sh
+  或手动：cp deploy/.env.example deploy/.env 然后逐项填写"
 command -v docker >/dev/null 2>&1 || die "未安装 docker（Ubuntu：curl -fsSL https://get.docker.com | sh）"
 docker compose version >/dev/null 2>&1 || die "缺少 docker compose v2 插件，请升级 Docker 到 20.10+"
 

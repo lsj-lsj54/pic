@@ -418,9 +418,11 @@ docker compose --env-file deploy/.env -f deploy/docker-compose.yml up -d --build
 
 | 文件 | 用途 |
 | --- | --- |
-| `deploy/deploy.sh` | 一键发布：拦住占位密码、预校验 Nginx 配置、按 git SHA 打标签、健康检查、失败自动回滚 |
+| `deploy/make-env.sh` | **本机**生成 `deploy/.env`：自动读 `application-local.yml` 里的 COS 参数 + 随机生成数据库密码 |
+| `deploy/deploy.sh` | 一键发布：拦住占位密码、预校验 Nginx 配置、按 git SHA 打标签、健康检查、失败自动回滚；按内存自动选完整版/低配版编排 |
 | `deploy/backup.sh` | 数据库备份：mysqldump + gzip + 按天保留 + 可选上传 COS |
 | `deploy/docker-compose.yml` | MySQL + Redis + 后端 + 前端；端口、镜像标签均可用 `.env` 覆盖 |
+| `deploy/docker-compose.free.yml` | 免 Redis 的低配编排（1~2G 内存机器用），MySQL 压到 96M |
 | `deploy/docker-compose.https.yml` | HTTPS 叠加配置（挂证书 + 443），配腾讯云免费证书用 |
 | `deploy/mysql/init.sql` | 首次部署建库建表（`CREATE TABLE IF NOT EXISTS`，可重复执行） |
 | `deploy/mysql/migration-*.sql` | 已有库的增量迁移（缩略图字段、主色调字段） |

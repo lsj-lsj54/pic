@@ -6,6 +6,141 @@
 
 ---
 
+## 〇、最短路径：从零到能访问，10 步
+
+> 这是照着敲就能跑完的顺序版，细节与坑在后面的章节里展开。
+> **图片继续用腾讯云 COS，不需要迁 OSS**（原因见第六节）。
+
+### 第 0 步｜本机准备（两件事，别跳过）
+
+```bash
+# ① 代码要推到 GitHub，服务器才能拉得到（当前有未提交改动就先提交）
+git add -A && git commit -m "准备部署" && git push
+
+# ② 生成 deploy/.env（自动读 application-local.yml 里的 COS 参数 + 随机生成数据库密码）
+bash deploy/make-env.sh
+```
+
+> 仓库地址是 `https://github.com/lsj-lsj54/pic.git`。
+> **如果是私有仓库**，服务器上 `git clone` 不能用密码，要用 Personal Access Token：
+> `git clone https://<你的token>@github.com/lsj-lsj54/pic.git picture`
+> 公开仓库直接 clone 即可。
+
+### 第 1 步｜买机器
+
+阿里云 ECS 或轻量应用服务器，**2 核 2G 起步**，镜像选 **Ubuntu 22.04**，地域选离你近的。
+省钱要点：**ECS 经济型 e（99 元/年，续费同价）**，别为了省 30 元买 38 元的秒杀款（次年涨到 68）。
+
+### 第 2 步｜安全组 / 防火墙放行端口
+
+| 端口 | 来源 |
+| --- | --- |
+| 22 | 只填你的公网 IP |
+| 80（未备案用 8080） | 0.0.0.0/0 |
+| 443（配了 HTTPS 才需要） | 0.0.0.0/0 |
+
+**不要开 3306 / 6379 / 8666。**
+
+### 第 3 步｜登录服务器
+
+```bash
+ssh root@<公网IP>
+```
+
+### 第 4 步｜装 Docker
+
+```bash
+curl -fsSL https://get.docker.com | sudo sh
+sudo systemctl enable --now docker
+sudo usermod -aG docker $USER && newgrp docker
+docker compose version          # 确认是 v2
+```
+
+2 核 2G 建议先加 2G swap（否则在服务器上跑 Maven 构建可能被 OOM Kill）：
+
+```bash
+sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile
+sudo mkswap /swapfile && sudo swapon /swapfile
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+```
+
+### 第 5 步｜拉代码
+
+```bash
+cd /root
+git clone https://github.com/lsj-lsj54/pic.git picture
+cd picture
+```
+
+### 第 6 步｜把 .env 传上去
+
+```bash
+# 本机执行（在项目目录里）
+scp deploy/.env root@<公网IP>:/root/picture/deploy/.env
+
+# 服务器上执行
+cd /root/picture && chmod 600 deploy/.env
+# 没备案就把端口改掉：vi deploy/.env  →  HTTP_PORT=8080
+```
+
+### 第 7 步｜一键发布
+
+```bash
+bash deploy/deploy.sh
+```
+
+脚本会自动判断：**内存 < 3G 走免 Redis 的低配编排，≥ 3G 走完整版（带 Redis）**。
+想强制指定：`DEPLOY_MODE=free bash deploy/deploy.sh`。
+
+它依次做：校验 `.env`（拦住没改的占位密码）→ 校验 Nginx 配置 → 按 git SHA 打镜像标签 → 构建启动 →
+轮询接口做健康检查 → **不通过自动回滚到上一版本并打印日志**。
+
+### 第 8 步｜验证
+
+```bash
+# 容器都在 Up
+docker compose --env-file deploy/.env -f deploy/docker-compose.free.yml ps
+
+# 后端通了（未登录会返回 code 40100，能拿到 JSON 就对了）
+curl -s http://127.0.0.1/api/user/get/login
+
+# 前端拿到的后端地址是对的（这一步最容易静默失败）
+curl -s http://127.0.0.1/config.js | grep __API_BASE__   # 期望看到 '/api'
+```
+
+> 端口不是 80 的话把上面的 `127.0.0.1` 换成 `127.0.0.1:8080`。
+> 低配模式用的是 `default.no-cache.conf`（不打开缓存开关），所以不用检查 `__USE_CACHE__`。
+> 想确认容器实际加载的配置：`docker compose ... exec front nginx -T | grep sub_filter_types`
+
+浏览器打开 `http://<公网IP>:<端口>/`，能看到图片列表就成功了。
+
+### 第 9 步｜建管理员账号
+
+先用前端注册一个普通账号，再改角色：
+
+```bash
+docker exec -it picture-mysql mysql -uroot -p picture
+# 输入 .env 里的 MYSQL_ROOT_PASSWORD，然后：
+UPDATE user SET userRole = 'admin' WHERE userAccount = '你的账号';
+```
+
+### 第 10 步｜域名 + HTTPS（可选）
+
+1. 备案 → DNSPod 加 A 记录指向公网 IP
+2. 申请证书（**免费证书只有 3 个月**，见第八节）
+3. 用 HTTPS override 启动：
+   ```bash
+   docker compose --env-file deploy/.env -f deploy/docker-compose.yml -f deploy/docker-compose.https.yml up -d
+   ```
+
+### 以后更新代码
+
+```bash
+cd /root/picture && git pull && bash deploy/deploy.sh
+```
+
+---
+
 ## 一、买哪台：重点不是首年价，是「续费同价」
 
 2026 年阿里云的服务器优惠（**价格波动频繁，下单前务必以官网实时价为准**）：
