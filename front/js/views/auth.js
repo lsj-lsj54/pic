@@ -16,6 +16,10 @@ function openRegisterModal() {
           <input name="userAccount" type="text" placeholder="至少 2 位" autocomplete="username" required>
         </label>
         <label class="field">
+          <span>昵称</span>
+          <input name="userName" type="text" maxlength="20" placeholder="展示给其他人看，最多 20 字（不填自动生成）">
+        </label>
+        <label class="field">
           <span>密码</span>
           <input name="userPassword" type="password" placeholder="至少 5 位" autocomplete="new-password" required>
         </label>
@@ -38,11 +42,17 @@ function openRegisterModal() {
       toast('账号和密码不能为空', 'error');
       return;
     }
+    // 与后端 UserConstant.MIN_PASSWORD_LENGTH 保持一致
+    if (values.userPassword.length < 5) {
+      toast('密码至少 5 位', 'error');
+      return;
+    }
     if (values.userPassword !== values.checkPassword) {
       toast('两次输入的密码不一致', 'error');
       return;
     }
     try {
+      // userName 为空时后端会自动生成一个「用户 + 随机数」的昵称
       await userApi.register(values);
       closeModal();
       toast('注册成功，请登录', 'success');

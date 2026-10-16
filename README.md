@@ -327,10 +327,11 @@ UPDATE user SET userRole = 'admin' WHERE userAccount = '你的账号';
 
 | 方法 | 路径 | 说明 | 权限 |
 | --- | --- | --- | --- |
-| POST | `/user/register` | 注册 | 公开 |
+| POST | `/user/register` | 注册（`userAccount`、`userPassword`、`checkPassword`，昵称 `userName` 可选，不传自动生成） | 公开 |
 | POST | `/user/login` | 登录（写入 Session） | 公开 |
 | GET | `/user/get/login` | 获取当前登录用户 | 登录 |
 | POST | `/user/logout` | 注销 | 登录 |
+| POST | `/user/update/my` | 修改自己的昵称（id 取自登录态，只能改自己） | 登录 |
 | GET | `/user/get/vo` | 按 id 获取脱敏用户 | 公开 |
 | POST | `/user/list/page/vo` | 用户分页 | 管理员 |
 | POST | `/user/add`、`/user/update`、`/user/delete`、`GET /user/get` | 用户增删改查 | 管理员 |

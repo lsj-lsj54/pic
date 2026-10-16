@@ -10,7 +10,9 @@ import {
 import {
   openPictureDetail, openEditModal, openUploadModal, thumbUrl,
 } from '../components/picture.js';
+import { openNicknameModal } from '../components/profile.js';
 import { openLightbox } from '../components/lightbox.js';
+import { refreshShellUserName } from '../app.js';
 
 /** 每页数量，后端限制不能超过 20 */
 const PAGE_SIZE = 12;
@@ -155,15 +157,16 @@ export default {
    * @param {HTMLElement} el 视图容器
    */
   render(el) {
+    const currentUser = state.getCurrentUser();
+    const displayName = currentUser.userName || currentUser.userAccount;
     el.innerHTML = `
       <section class="toolbar">
         <div class="toolbar-left">
           <h2 class="page-title">我的图片</h2>
-          <span class="page-sub">当前账号：${escapeHtml(
-    state.getCurrentUser().userName || state.getCurrentUser().userAccount,
-  )}（这里只显示公共图库的图片，空间里的图片在「我的空间」）</span>
+          <span class="page-sub">当前账号：<span id="mine-user-name">${escapeHtml(displayName)}</span>（这里只显示公共图库的图片，空间里的图片在「我的空间」）</span>
         </div>
         <div class="toolbar-right">
+          <button class="btn" id="nickname-btn" type="button">修改昵称</button>
           <button class="btn btn-primary" id="upload-btn" type="button">上传图片</button>
         </div>
       </section>
@@ -172,6 +175,20 @@ export default {
 
     $('#upload-btn', el).addEventListener('click', () => {
       openUploadModal({ onSuccess: () => load(el) });
+    });
+
+    $('#nickname-btn', el).addEventListener('click', () => {
+      openNicknameModal({
+        onSuccess: (user) => {
+          // 只改这一行文字，不必整页重渲染（重渲染会重新拉一遍图片列表）
+          const nameEl = $('#mine-user-name', el);
+          if (nameEl) {
+            nameEl.textContent = user.userName || user.userAccount;
+          }
+          // 头部和这里是两处独立的 DOM，都要同步，否则会出现两个不同的昵称
+          refreshShellUserName();
+        },
+      });
     });
 
     load(el);

@@ -23,9 +23,21 @@ public interface UserService extends IService<User> {
      * @param userAccount   用户账户
      * @param userPassword  用户密码
      * @param checkPassword 校验密码
+     * @param userName      用户昵称，可为空
      * @return 新用户 id
      */
-    long userRegister(String userAccount, String userPassword, String checkPassword);
+    long userRegister(String userAccount, String userPassword, String checkPassword, String userName);
+
+    /**
+     * 修改当前登录用户的昵称
+     * <p>
+     * 与注册共用同一套昵称校验规则：不能为空、不能超过最大长度。
+     *
+     * @param userId   当前登录用户 id
+     * @param userName 新昵称
+     * @return 是否修改成功
+     */
+    boolean updateUserName(long userId, String userName);
 
     /**
      * 用户登录

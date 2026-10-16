@@ -1,10 +1,12 @@
 package com.lsj.demo.service.impl;
 
+import cn.hutool.core.util.RandomUtil;
 import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.lsj.demo.exception.BusinessException;
 import com.lsj.demo.exception.ErrorCode;
+import com.lsj.demo.model.constant.UserConstant;
 import com.lsj.demo.model.dto.user.UserQueryRequest;
 import com.lsj.demo.model.entity.User;
 import com.lsj.demo.model.enums.UserRoleEnum;
@@ -20,6 +22,7 @@ import com.lsj.demo.model.vo.UserVO;
 
 import javax.servlet.http.HttpServletRequest;
 
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -43,10 +46,11 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
      * @param userAccount   用户账户
      * @param userPassword  用户密码
      * @param checkPassword 校验密码
+     * @param userName      用户昵称，为空时自动生成
      * @return 新用户 id
      */
     @Override
-    public long userRegister(String userAccount, String userPassword, String checkPassword) {
+    public long userRegister(String userAccount, String userPassword, String checkPassword, String userName) {
         // 1. 校验
         if (StrUtil.hasBlank(userAccount, userPassword, checkPassword)) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "参数为空");
@@ -54,8 +58,11 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
         if (userAccount.length() < 2) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "用户账号过短");
         }
-        if (userPassword.length() < 5 || checkPassword.length() < 5) {
-            throw new BusinessException(ErrorCode.PARAMS_ERROR, "用户密码过短");
+        // 与登录共用同一个最小长度常量，避免两处阈值不一致导致「能注册不能登录」
+        if (userPassword.length() < UserConstant.MIN_PASSWORD_LENGTH
+                || checkPassword.length() < UserConstant.MIN_PASSWORD_LENGTH) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR,
+                    "用户密码过短，至少 " + UserConstant.MIN_PASSWORD_LENGTH + " 位");
         }
         if (!userPassword.equals(checkPassword)) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "两次输入的密码不一致");
@@ -73,13 +80,70 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
         User user = new User();
         user.setUserAccount(userAccount);
         user.setUserPassword(encryptPassword);
-        user.setUserName("吕世杰");
+        // 昵称由用户自己填，没填才兜底生成，不能写死成同一个名字
+        user.setUserName(resolveUserName(userName));
         user.setUserRole(UserRoleEnum.USER.getValue());
         boolean saveResult = this.save(user);
         if (!saveResult) {
             throw new BusinessException(ErrorCode.SYSTEM_ERROR, "注册失败，数据库错误");
         }
         return user.getId();
+    }
+
+    /**
+     * 规整注册时提交的昵称
+     *
+     * @param userName 用户填写的昵称，可为空
+     * @return 最终写入数据库的昵称
+     */
+    private String resolveUserName(String userName) {
+        // 留空兜底：用户 + 6 位随机数，保证每个新用户都有可区分的昵称
+        if (StrUtil.isBlank(userName)) {
+            return UserConstant.DEFAULT_USER_NAME_PREFIX + RandomUtil.randomNumbers(6);
+        }
+        return checkUserName(userName);
+    }
+
+    /**
+     * 校验昵称是否合法，并返回去除首尾空白后的结果
+     *
+     * @param userName 待校验的昵称
+     * @return 规整后的昵称
+     */
+    private String checkUserName(String userName) {
+        String finalUserName = userName == null ? "" : userName.trim();
+        if (StrUtil.isBlank(finalUserName)) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "昵称不能为空");
+        }
+        if (finalUserName.length() > UserConstant.MAX_USER_NAME_LENGTH) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR,
+                    "昵称过长，最多 " + UserConstant.MAX_USER_NAME_LENGTH + " 个字符");
+        }
+        return finalUserName;
+    }
+
+    /**
+     * 修改当前登录用户的昵称
+     *
+     * @param userId   当前登录用户 id
+     * @param userName 新昵称
+     * @return 是否修改成功
+     */
+    @Override
+    public boolean updateUserName(long userId, String userName) {
+        if (userId <= 0) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR);
+        }
+        // 只设置 id 和 userName，MyBatis-Plus 只更新非 null 字段，
+        // 不会把密码、角色、头像等字段一起覆盖掉
+        User user = new User();
+        user.setId(userId);
+        user.setUserName(checkUserName(userName));
+        boolean result = this.updateById(user);
+        if (!result) {
+            throw new BusinessException(ErrorCode.OPERATION_ERROR, "昵称修改失败");
+        }
+        return true;
     }
 
     /**
@@ -92,7 +156,10 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
     public String getEncryptPassword(String userPassword) {
         // 盐值，混淆密码
         final String SALT = "yupi";
-        return DigestUtils.md5DigestAsHex((SALT + userPassword).getBytes());
+        // 显式指定 UTF-8：getBytes() 用平台默认字符集，本地（GBK）与服务器（UTF-8）
+        // 加密结果会不一致，表现为「本地注册的账号在服务器上登录不了」，
+        // 密码里含中文等非 ASCII 字符时必现。
+        return DigestUtils.md5DigestAsHex((SALT + userPassword).getBytes(StandardCharsets.UTF_8));
     }
 
 
@@ -113,9 +180,9 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
         if (userAccount.length() < 2) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "账号错误");
         }
-        if (userPassword.length() < 6) {
-            throw new BusinessException(ErrorCode.PARAMS_ERROR, "密码错误");
-        }
+        // 这里不再单独拦截「密码过短」：
+        // 之前写的是 < 6，而注册只要求 < 5，导致 5 位密码注册成功却永远登不进去。
+        // 密码正确与否统一交给下面的数据库比对来判断。
         // 2. 加密
         String encryptPassword = getEncryptPassword(userPassword);
         // 查询用户是否存在

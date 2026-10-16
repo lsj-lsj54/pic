@@ -3,6 +3,7 @@
  */
 import { userApi, setNotLoginHandler } from './api.js';
 import { state, $, $$, toast, escapeHtml, renderSkeleton } from './ui.js';
+import { openNicknameModal } from './components/profile.js';
 
 /** 路由表，hash 的 path 对应一个懒加载视图 */
 const routes = [
@@ -78,8 +79,8 @@ function renderShell(layout) {
         </nav>
         <div class="user-area">
           ${state.isLogin()
-    ? `<span class="user-name">${escapeHtml(state.getCurrentUser().userName
-      || state.getCurrentUser().userAccount)}</span>
+    ? `<button class="user-name" id="user-name-btn" type="button" title="点击修改昵称">${escapeHtml(
+      state.getCurrentUser().userName || state.getCurrentUser().userAccount)}</button>
               ${state.isAdmin() ? '<span class="tag tag-admin">管理员</span>' : ''}
               <button class="btn btn-sm" id="logout-btn" type="button">退出</button>`
     : '<button class="btn btn-sm btn-primary" id="login-btn" type="button">登录 / 注册</button>'}
@@ -104,6 +105,12 @@ function bindShellEvents() {
   if (loginBtn) {
     loginBtn.addEventListener('click', () => navigate('/login'));
   }
+  const userNameBtn = $('#user-name-btn');
+  if (userNameBtn) {
+    userNameBtn.addEventListener('click', () => {
+      openNicknameModal({ onSuccess: refreshShellUserName });
+    });
+  }
   const logoutBtn = $('#logout-btn');
   if (logoutBtn) {
     logoutBtn.addEventListener('click', async () => {
@@ -117,6 +124,19 @@ function bindShellEvents() {
       toast('已退出登录', 'success');
       navigate('/login');
     });
+  }
+}
+
+/**
+ * 刷新头部显示的用户昵称
+ * <p>
+ * renderShell 只在路由切换时执行，改完昵称头部不会自己重绘；
+ * 这里只更新那一小块 DOM，避免整页重绘带来的闪烁和滚动位置丢失。
+ */
+export function refreshShellUserName() {
+  const nameEl = $('#user-name-btn');
+  if (nameEl && state.isLogin()) {
+    nameEl.textContent = state.getCurrentUser().userName || state.getCurrentUser().userAccount;
   }
 }
 

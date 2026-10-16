@@ -13,6 +13,7 @@ import com.lsj.demo.model.dto.user.UserAddRequest;
 import com.lsj.demo.model.dto.user.UserLoginRequest;
 import com.lsj.demo.model.dto.user.UserQueryRequest;
 import com.lsj.demo.model.dto.user.UserRegisterRequest;
+import com.lsj.demo.model.dto.user.UserUpdateMyRequest;
 import com.lsj.demo.model.dto.user.UserUpdateRequest;
 import com.lsj.demo.model.entity.User;
 import com.lsj.demo.model.vo.LoginUserVO;
@@ -53,7 +54,8 @@ public class UserController {
         String userAccount = userRegisterRequest.getUserAccount();
         String userPassword = userRegisterRequest.getUserPassword();
         String checkPassword = userRegisterRequest.getCheckPassword();
-        long result = userService.userRegister(userAccount, userPassword, checkPassword);
+        String userName = userRegisterRequest.getUserName();
+        long result = userService.userRegister(userAccount, userPassword, checkPassword, userName);
         return ResultUtils.success(result);
     }
 
@@ -96,6 +98,26 @@ public class UserController {
         ThrowUtils.throwIf(request == null, ErrorCode.PARAMS_ERROR);
         boolean result = userService.userLogout(request);
         return ResultUtils.success(result);
+    }
+
+    /**
+     * 修改当前登录用户的昵称
+     * <p>
+     * 登录即可调用，不需要管理员权限。用户 id 一律从 Session 里取，
+     * 前端传什么 id 都改不了别人的昵称。
+     *
+     * @param userUpdateMyRequest 修改请求，目前只有昵称字段
+     * @param request             request 请求
+     * @return 更新后的脱敏用户信息，前端可直接用来刷新头部显示
+     */
+    @PostMapping("/update/my")
+    public BaseResponse<LoginUserVO> updateMyUser(@RequestBody UserUpdateMyRequest userUpdateMyRequest,
+                                                  HttpServletRequest request) {
+        ThrowUtils.throwIf(userUpdateMyRequest == null, ErrorCode.PARAMS_ERROR);
+        User loginUser = userService.getLoginUser(request);
+        userService.updateUserName(loginUser.getId(), userUpdateMyRequest.getUserName());
+        // 重新查一次再脱敏返回，避免把 Session 里的旧昵称回给前端
+        return ResultUtils.success(userService.getLoginUserVO(userService.getById(loginUser.getId())));
     }
 
     /**

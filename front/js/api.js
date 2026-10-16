@@ -127,6 +127,8 @@ export const userApi = {
   getLoginUser: () => request('/user/get/login'),
   /** 用户注销 */
   logout: () => request('/user/logout', { method: 'POST', body: {} }),
+  /** 修改当前登录用户的昵称，返回最新的登录用户信息 */
+  updateMy: (data) => request('/user/update/my', { method: 'POST', body: data }),
   /** 创建用户（仅管理员） */
   add: (data) => request('/user/add', { method: 'POST', body: data }),
   /** 根据 id 获取用户（仅管理员） */

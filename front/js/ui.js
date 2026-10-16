@@ -339,7 +339,13 @@ export function confirmDialog(message, title = '操作确认') {
 export function getFormValues(form) {
   const values = {};
   $$('[name]', form).forEach((el) => {
-    values[el.name] = el.type === 'checkbox' ? el.checked : el.value.trim();
+    if (el.type === 'checkbox') {
+      values[el.name] = el.checked;
+      return;
+    }
+    // 密码不 trim：首尾空格也是密码的一部分。若注册时被悄悄去掉、
+    // 登录时用户又照原样输入，就会出现「密码明明是对的却提示错误」。
+    values[el.name] = el.type === 'password' ? el.value : el.value.trim();
   });
   return values;
 }
