@@ -6,6 +6,8 @@ import cn.dev33.satoken.exception.NotRoleException;
 import com.lsj.demo.exception.BusinessException;
 import com.lsj.demo.exception.ErrorCode;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataAccessException;
+import org.springframework.data.redis.RedisConnectionFailureException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
@@ -54,6 +56,34 @@ public class GlobalExceptionHandler {
     public BaseResponse<?> notRoleExceptionHandler(NotRoleException e) {
         log.warn("NotRoleException: {}", e.getMessage());
         return ResultUtils.error(ErrorCode.NO_AUTH_ERROR, "无权限");
+    }
+
+    /**
+     * 处理 Redis 连接失败异常（降级兜底）
+     * <p>
+     * Sa-Token 会话与列表缓存都依赖 Redis，Redis 不可用时若放任异常上抛，
+     * 会被下面的 RuntimeException 分支吞成笼统的「系统错误」。这里单独拦截，
+     * 返回明确的服务不可用提示，方便用户与运维感知 Redis 状态。
+     *
+     * @param e Redis 连接失败异常
+     * @return 统一响应，提示服务暂不可用
+     */
+    @ExceptionHandler(RedisConnectionFailureException.class)
+    public BaseResponse<?> redisConnectionFailureExceptionHandler(RedisConnectionFailureException e) {
+        log.error("Redis 连接失败，会话与缓存暂不可用", e);
+        return ResultUtils.error(ErrorCode.SERVICE_UNAVAILABLE, "服务暂时不可用，请稍后重试");
+    }
+
+    /**
+     * 处理其它数据访问异常（Redis 超时、反序列化失败等 DataAccessException 子类）
+     *
+     * @param e 数据访问异常
+     * @return 统一响应
+     */
+    @ExceptionHandler(DataAccessException.class)
+    public BaseResponse<?> dataAccessExceptionHandler(DataAccessException e) {
+        log.error("数据访问异常", e);
+        return ResultUtils.error(ErrorCode.SERVICE_UNAVAILABLE, "服务暂时不可用，请稍后重试");
     }
 
     /**

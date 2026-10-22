@@ -196,7 +196,14 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "用户不存在或密码错误");
         }
         // 3. 记录用户的登录态（改用 Sa-Token：以用户 id 作为登录凭证，会话存 Redis）
-        StpUtil.login(user.getId());
+        try {
+            StpUtil.login(user.getId());
+        } catch (org.springframework.dao.DataAccessException e) {
+            // Redis 不可用（连接失败/超时）时 Sa-Token 无法写入会话，
+            // 这里不把异常吞成「系统错误」，而是明确告知是服务不可用，方便排查与重试。
+            log.error("登录失败：Redis 不可用，无法写入登录态", e);
+            throw new BusinessException(ErrorCode.SERVICE_UNAVAILABLE, "登录服务暂不可用，请稍后重试");
+        }
         return this.getLoginUserVO(user);
     }
 
