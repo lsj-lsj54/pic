@@ -3,16 +3,17 @@
 ![Java](https://img.shields.io/badge/Java-8%20%7C%20JDK%2017-orange)
 ![Spring Boot](https://img.shields.io/badge/Spring%20Boot-2.6.13-6db33f)
 ![MyBatis-Plus](https://img.shields.io/badge/MyBatis--Plus-3.5.9-2f6fed)
+![Sa-Token](https://img.shields.io/badge/Sa--Token-1.38.0-2f6fed)
 ![MySQL](https://img.shields.io/badge/MySQL-8.0-4479a1)
 ![Redis](https://img.shields.io/badge/Redis-7-dc382d)
 ![COS](https://img.shields.io/badge/对象存储-腾讯云%20COS-0052d9)
 ![Frontend](https://img.shields.io/badge/前端-零依赖%20ES%20Module-success)
 
-把图片传上来、自动压好缩略图、过一遍审核，再按「**公共图库 / 私有空间**」两套模型管理起来。
+把图片传上来、自动压好缩略图、过一遍审核，再按「**公共图库 / 私有空间 / 团队空间**」三套模型管理起来。
 
 
 
-后端 Spring Boot + MyBatis-Plus + MySQL + Redis + 腾讯云 COS；前端零依赖原生 ES Module（无构建、无第三方运行时依赖）；
+后端 Spring Boot + MyBatis-Plus + Sa-Token + MySQL + Redis + 腾讯云 COS；前端零依赖原生 ES Module（无构建、无第三方运行时依赖）；
 配套 Docker Compose 一套命令部署上线。
 
 | | 说明 |
@@ -20,8 +21,8 @@
 | **上传** | 本地文件 / 图片链接 / 关键词批量抓取三条入口，单张超过 900KB 在前端先压缩，后端统一走模板方法落对象存储 |
 | **加速** | 一次上传产出「原图 + webp 缩略图」，列表页用缩略图、详情页用原图；列表查询走 Caffeine → Redis → MySQL 三级读取 |
 | **治理** | 非管理员上传的图片自动进入待审核，管理员审核通过后才出现在公共图库 |
-| **空间** | 公共图库 + 私有空间两级模型，空间按级别（普通/专业/旗舰）限数量与容量，用量随图片增删实时结算 |
-| **权限** | 注解式角色鉴权（AOP）+ 数据级归属校验：图片、空间都只有本人（或空间创建者）与管理员可操作 |
+| **空间** | 公共图库 + 私有空间 + 团队空间三级模型，空间按级别（普通/专业/旗舰）限数量与容量，用量随图片增删实时结算；团队空间支持成员协作（viewer / editor / admin 三级角色） |
+| **权限** | Sa-Token 统一登录态与权限：全局角色 + 空间维度动态权限码，配合注解校验，图片、空间、成员操作都有归属与角色双重校验 |
 
 > 详细部署（服务器选型、Docker Compose、Nginx、HTTPS、日常运维）见 [docs/deploy.md](docs/deploy.md)，免费方案见 [docs/deploy-free.md](docs/deploy-free.md)。
 
@@ -61,12 +62,13 @@
 
 | 模块 | 能力 |
 | --- | --- |
-| 用户 | 注册（MD5 加盐）、登录 / 注销、登录态自动恢复、角色（user / admin）、注解式权限校验 |
+| 用户 | 注册（MD5 加盐）、登录 / 注销、登录态自动恢复（Sa-Token 会话，存 Redis）、角色（user / admin）、注解式权限校验、按昵称/账号模糊搜索 |
+| 团队空间 | 每人可创建 1 个私有 + 1 个团队空间；团队空间按昵称邀请成员、调整角色（viewer / editor / admin）、移除成员或自行退出；成员可查看、按角色可操作；「我加入的团队空间」独立区块 |
 | 图片浏览 | 分页网格、名称/简介关键词搜索（防抖）、分类筛选、按时间/体积排序、详情弹窗（缩略图 → 原图）、查看原图、按主色调（腾讯云 imageAve）查图（工具栏取色器 + 容差滑块，卡片主色块可一键「按此色找相似」） |
 | 图片上传 | 本地文件（可多选、前端 canvas 压缩）、图片链接导入、关键词批量抓取（必应，单次上限 30 张、自动去重） |
 | 图片管理 | 分页查询、按审核状态筛选、通过 / 拒绝（可改判）、编辑信息（标签数组 ↔ JSON）、重新上传、删除（库 + 缓存 + 对象存储三处一致） |
 | 我的图片 | 自己上传的公共图库图片，带审核状态角标，可编辑 / 重传 / 删除 |
-| 空间 | 创建（级别决定限额）、重命名、删除（连带清理空间内图片）、空间列表带数量与容量进度条 |
+| 空间 | 创建（类型：私有/团队 + 级别决定限额）、重命名、删除（连带清理空间内图片与成员记录）、空间列表带数量与容量进度条 |
 | 空间分析 | 空间资源用量（容量/数量仪表盘）、分类分布（分组条形图）、标签词云、大小分段（饼图）、上传趋势（按天/周/月折线）；管理员可汇总全系统并查看空间使用排行（ECharts） |
 | 交互与观感 | 全屏图片查看器（滚轮/双击缩放、拖拽平移、键盘 ←→/±/f 与缩略图导航）、卡片悬停遮罩 + 快速操作、列表骨架屏、Toast 堆叠与进度条、滚动渐入、按钮涟漪；统一设计 token（色彩/阴影/圆角/缓动）与 :focus-visible 焦点环，动效遵循 prefers-reduced-motion |
 | 空间内图片 | 上传到指定空间（上传前校验数量、拿到真实体积后校验容量）、浏览、编辑、重传、删除，用量实时回填 |
@@ -80,9 +82,9 @@
 | 分类 | 选型 |
 | --- | --- |
 | 语言 / 构建 | Java 8 语言级别（构建与运行使用 JDK 17）、Maven 3.8 |
-| 后端框架 | Spring Boot 2.6.13、Spring AOP（自定义 `@AuthCheck`）、Spring Session（HttpSession 登录态） |
+| 后端框架 | Spring Boot 2.6.13、Spring AOP、Sa-Token 1.38.0（登录态 + 角色/权限校验，会话存 Redis） |
 | 持久层 | MyBatis-Plus 3.5.9（含 `mybatis-plus-jsqlparser` 分页插件）、MySQL 8、逻辑删除、雪花 ID |
-| 缓存 | Caffeine 3.1.8（本地一级）+ Redis / Spring Data Redis（分布式二级） |
+| 缓存 | Caffeine 3.1.8（本地一级）+ Redis / Spring Data Redis（分布式二级 + Sa-Token 会话） |
 | 对象存储 | 腾讯云 COS Java SDK 5.6.227 + 数据万象（上传即产出 webp 压缩图） |
 | 工具库 | Hutool 5.8.26（HTTP / 文件 / 日期）、jsoup 1.15.3（抓取解析）、Lombok |
 | 接口文档 | Knife4j 4.4.0（OpenAPI 2 / Swagger） |
@@ -127,11 +129,13 @@
 ```
 .
 ├── src/main/java/com/lsj/demo
-│   ├── controller          # 接口层：user / picture / space / file
-│   │   └── aop             # @AuthCheck 注解式鉴权切面
+│   ├── controller          # 接口层：user / picture / space / spaceUser / file
+│   │   └── aop             # 鉴权切面（@AuthCheck 全局角色、@SaCheckSpaceRole 空间角色）
 │   ├── service             # 业务层接口与实现（含空间配额、缓存、审核逻辑）
+│   ├── config              # Sa-Token 集成（StpInterface 动态权限、拦截器注册）
+│   ├── annotation          # 自定义注解（AuthCheck、SaCheckSpaceRole）
 │   ├── manager             # 外部能力封装
-│   │   ├── CosManager      # 对象存储：上传、压缩规则、按 url 反查 key 删除
+│   │   ├── CosManager      # 对象存储：上传、压缩规则、按 url 反查 key 删除、设置 ACL
 │   │   ├── FileManager     # 早期上传实现（已废弃，保留对比）
 │   │   ├── factory         # 上传方式工厂（file / url）
 │   │   └── uplode          # 上传模板与两种实现（本地文件 / URL 下载）
@@ -140,20 +144,20 @@
 │   │   ├── entity          # 数据库实体
 │   │   ├── dto             # 请求对象（按模块分包）
 │   │   ├── vo              # 返回对象（统一提供 voToEntity / entityToVo）
-│   │   └── enums           # 空间级别、审核状态、上传方式、用户角色
+│   │   └── enums           # 空间级别、空间类型、审核状态、上传方式、用户/空间角色
 │   ├── common              # 统一响应、分页基类、权限工具、全局异常处理
 │   └── exception           # 错误码与业务异常
 ├── src/main/resources
-│   ├── application.yml         # 主配置（端口 / 数据源 / multipart）
+│   ├── application.yml         # 主配置（端口 / 数据源 / multipart / Sa-Token）
 │   └── application-local.yml   # 本地密钥（已 gitignore，需自行创建）
-├── src/test/java           # 单元测试 145 项
+├── src/test/java           # 单元测试 167 项
 ├── front/                  # 前端（原生 ES Module，详见 front/README.md）
 │   ├── js/{api,ui,app}.js  # 请求封装 / 通用组件 / 路由入口
 │   ├── js/views/           # 各页面（浏览、我的图片、我的空间、空间详情、管理端）
 │   ├── js/components/      # 上传、详情、编辑弹窗与图片压缩
 │   ├── server.js           # 零依赖静态服务器 + /api 代理
 │   └── smoke-test.mjs      # 模块冒烟检查；e2e-test.mjs 端到端回归
-├── sql/                    # 建表脚本（user / picture / space）
+├── sql/                    # 建表脚本（user / picture / space / space_user）
 ├── deploy/                 # Dockerfile 之外的部署资产：compose、mysql 初始化、nginx、.env 模板
 ├── docs/deploy.md          # 部署指南
 ├── Dockerfile              # 后端多阶段构建（Maven 构建 + JRE 运行）
@@ -198,20 +202,28 @@ processFile(输入, 文件) → 落地临时文件（本地转存 / 远程下载
 - 审核状态变更后立即清缓存，公共图库的可见性随之变化；
 - 管理端支持改判（通过 ↔ 拒绝），拒绝时可带上审核信息。
 
-### 5. 空间模型：公共图库 / 私有空间 + 配额
+### 5. 空间模型：公共图库 / 私有空间 / 团队空间 + 配额
 
-- `spaceId` 为空表示**公共图库**（所有人可见），不为空表示**私有空间**（仅空间创建者与管理员可见、可操作）；
+- `spaceId` 为空表示**公共图库**（所有人可见）；不为空表示**私有/团队空间**，按空间类型与成员角色控制可见性与操作权限；
+- 空间类型分两类：**私有空间**（仅创建者与管理员可见可操作）与**团队空间**（成员可查看，admin / editor 角色成员可操作），每用户各限 1 个；
 - 空间级别（普通版 100 张 / 100MB，专业版 1000 张 / 1GB，旗舰版 10000 张 / 10GB）在建空间时自动填充限额，非管理员只能创建普通版；
 - 上传先校验数量（放不下就不用白跑一趟上传），拿到真实体积后再校验容量，**超限会把刚传上去的文件从对象存储删掉**，不留垃圾；
 - 用量（`totalCount` / `totalSize`）用 SQL 原子自增自减维护（`totalCount = totalCount + (?)`），避免「先查再更新」在并发上传时丢更新；
 - 公共列表查询会**显式追加 `spaceId IS NULL`**：不加这个条件，私有空间里的图片会出现在公共图库中（越权泄漏）。
 
-### 6. 批量抓取
+### 6. 权限模型：Sa-Token 统一登录态与空间角色
+
+- **登录态**：`StpUtil.login(userId)` 签发 token，写入 Cookie（`satoken`），前端沿用 `credentials: 'include'` 无需改动；会话存 Redis（`sa-token-redis-jackson`），重启/多实例不丢登录态；
+- **动态权限**：实现 `StpInterface`，按登录账号实时计算——全局角色（`admin` / `user`）与空间维度权限码（`space:creator:{id}`、`space:{viewer|editor|admin}:{id}`），成员被移除后下次请求即失效，无需手动清缓存；
+- **校验入口**：`SpacePermissionUtils`（工具类，内部走 `StpUtil.hasPermission`）为主力路径；`@SaCheckSpaceRole` + `SpaceRoleAspect` 提供声明式注解校验；全局 admin 仍由 `@AuthCheck` 切面校验；
+- **未登录 / 无权限**：`GlobalExceptionHandler` 统一映射 `NotLoginException → 40100`、`NotPermissionException/NotRoleException → 40101`，与原有错误码语义一致，前端无感。
+
+### 7. 批量抓取
 
 解析必应图片搜索的异步结果片段，优先取结果条目 `m` 属性里的 `murl`（原图直链），
 依次回退到 `murl` / `data-src` / `absUrl(src)`，并处理协议相对地址；同一批内按地址去重、单张失败不影响其余、数量有上限。
 
-### 7. 前端：零依赖的模块化 SPA
+### 8. 前端：零依赖的模块化 SPA
 
 - hash 路由 + `import()` 视图懒加载，模块按 `api / ui / components / views` 分层，改完刷新即生效，没有构建步骤；
 - 统一请求封装：自动解包 `BaseResponse`、携带 `credentials: 'include'` 维持登录态、`40100` 自动清理登录态并跳登录页；
@@ -235,6 +247,8 @@ processFile(输入, 文件) → 落地临时文件（本地转存 / 远程下载
 | 删除对象存储无效 | 删除接口需要的是对象 key，直接把完整 url 传进去不会报错，但什么也没删掉 | 增加 `parseKeyFromUrl` 反推 key，并加「同 url 被多条记录引用则跳过」的保护 |
 | CDN 地址导入被误杀 | 必应缩略图 `/th/id/OIP-C.TTm1he_xxx?w=155` 点号后面是 CDN 加密串，被当作文件后缀判为「文件类型错误」，合法图片传不上去 | 不再凭地址后缀判类型：先看 `Content-Type`，下载后按文件头（JPEG/PNG/WebP magic number）确认并纠正后缀；下载遇 5xx 自动重试一次 |
 | Lombok 与 JDK 21 不兼容 | JDK 21 下编译报 `NoSuchFieldError: JCTree$JCImport.qualid` | 构建统一使用 JDK 17（Docker 构建镜像同样固定 17） |
+| 图片 403 裂图 | 接口正常但 COS 图片 URL 返回 `AccessDenied`：桶是私有读、上传未设对象 ACL；或触发桶的防盗链 Referer 白名单拦截 | 上传后对原图与缩略图设置对象公有读 ACL，并提供批量修复接口；防盗链白名单需在控制台放行前端域名/localhost |
+| 后端端口被环境变量覆盖 | 会话注入 `SERVER__PORT`（Spring Boot relaxed binding）优先级高于 `application.yml` 的 `server.port`，后端实际监听了别的端口 | 启动时显式 `SERVER_PORT=8666 -Dserver.port=8666` 覆盖 |
 
 ---
 
@@ -247,7 +261,7 @@ processFile(输入, 文件) → 落地临时文件（本地转存 / 远程下载
 | JDK | **17**（Lombok 1.18.22 与 JDK 21 不兼容；源码语言级别为 Java 8） |
 | Maven | 3.8+ |
 | MySQL | 8.0 |
-| Redis | 7（可选：不启动时不要走带缓存的接口即可） |
+| Redis | 7（**必需**：Sa-Token 会话存 Redis，登录依赖 Redis 可用） |
 | 腾讯云 COS | 需要一个存储桶，并在控制台开启数据万象图片处理 |
 | Node.js | 18+（只用于启动前端静态服务器，前端本身无构建） |
 
@@ -257,8 +271,10 @@ processFile(输入, 文件) → 落地临时文件（本地转存 / 远程下载
 mysql -uroot -p < deploy/mysql/init.sql
 ```
 
-`deploy/mysql/init.sql` 全部是 `CREATE TABLE IF NOT EXISTS`，可重复执行，建的是 `picture` 库，包含三张表：
-`user`（用户）、`picture`（图片，审核字段与 `spaceId` 直接建在表里）、`space`（空间）。
+`deploy/mysql/init.sql` 全部是 `CREATE TABLE IF NOT EXISTS`，可重复执行，建的是 `picture` 库，包含四张表：
+`user`（用户）、`picture`（图片，审核字段与 `spaceId` 直接建在表里）、`space`（空间，含 `spaceType` 类型字段）、`space_user`（空间成员关联）。
+
+> 若从旧库升级，`sql/create_table_spaceuser.sql` 单独建空间成员表，其它字段变更见 `deploy/mysql/migration-*.sql`。
 
 ### 2. 配置
 
@@ -267,7 +283,7 @@ mysql -uroot -p < deploy/mysql/init.sql
 | 端口 / context-path / multipart 上限 | `application.yml` | 后端 8666，接口前缀 `/api`，单请求与单文件上限均为 10MB |
 | 数据库账号密码 | `application-local.yml` 或环境变量 | `application.yml` 里是 `${MYSQL_USERNAME:root}` / `${MYSQL_PASSWORD:}` 占位符，**仓库中不含任何密码** |
 | 腾讯云 COS 五项参数 | `application-local.yml` 或环境变量 | `cos.client.host / secretId / secretKey / region / bucket` |
-| Redis 连接 | `application-local.yml` | 本地不起 Redis 时，只要不走带缓存的接口即可 |
+| Redis 连接 | `application-local.yml` | **必需**：Sa-Token 会话存 Redis，未启动时登录会报错 |
 
 `src/main/resources/application-local.yml` **已被 `.gitignore` 排除**，本地按下面的结构自建即可（`spring.profiles.active=local` 会自动加载）：
 
@@ -330,10 +346,11 @@ UPDATE user SET userRole = 'admin' WHERE userAccount = '你的账号';
 | 方法 | 路径 | 说明 | 权限 |
 | --- | --- | --- | --- |
 | POST | `/user/register` | 注册（`userAccount`、`userPassword`、`checkPassword`，昵称 `userName` 可选，不传自动生成） | 公开 |
-| POST | `/user/login` | 登录（写入 Session） | 公开 |
+| POST | `/user/login` | 登录（Sa-Token 签发 token 写入 Cookie） | 公开 |
 | GET | `/user/get/login` | 获取当前登录用户 | 登录 |
 | POST | `/user/logout` | 注销 | 登录 |
 | POST | `/user/update/my` | 修改自己的昵称（id 取自登录态，只能改自己） | 登录 |
+| GET | `/user/search` | 按昵称/账号模糊搜索用户（脱敏，用于邀请成员） | 登录 |
 | GET | `/user/get/vo` | 按 id 获取脱敏用户 | 公开 |
 | POST | `/user/list/page/vo` | 用户分页 | 管理员 |
 | POST | `/user/add`、`/user/update`、`/user/delete`、`GET /user/get` | 用户增删改查 | 管理员 |
@@ -365,6 +382,16 @@ UPDATE user SET userRole = 'admin' WHERE userAccount = '你的账号';
 | GET | `/space/list/level` | 空间级别字典 | 公开 |
 | POST | `/space/list/page`、`/space/list/page/vo`、`GET /space/get`、`POST /space/update` | 管理端 | 管理员 |
 
+### 团队空间成员
+
+| 方法 | 路径 | 说明 | 权限 |
+| --- | --- | --- | --- |
+| POST | `/space/user/add` | 邀请用户加入团队空间（`spaceId` / `userId` / `spaceRole`，角色缺省 viewer） | 空间创建者 / 团队管理员 / 系统管理员 |
+| POST | `/space/user/delete` | 移除成员（成员也可用于退出团队） | 创建者 / 团队管理员 / 管理员，或成员本人 |
+| POST | `/space/user/edit` | 调整成员角色 | 空间创建者 / 系统管理员 |
+| POST | `/space/user/list` | 查询空间成员列表（可按角色筛选） | 空间成员 / 创建者 / 管理员 |
+| POST | `/space/user/list/my` | 查询「我加入的团队空间」列表 | 登录 |
+
 ### 文件（测试用）
 
 | 方法 | 路径 | 说明 | 权限 |
@@ -376,13 +403,13 @@ UPDATE user SET userRole = 'admin' WHERE userAccount = '你的账号';
 
 ## 测试
 
-### 后端单元测试（145 项）
+### 后端单元测试（167 项）
 
 ```bash
 mvn test
 ```
 
-覆盖查询条件构造（排序、筛选、空值）、VO 与实体互转、空间权限规则、图片空间鉴权、
+覆盖查询条件构造（排序、筛选、空值）、VO 与实体互转、空间权限规则（私有/团队）、图片空间鉴权、
 上传模板（本地文件 / URL / 后缀嗅探 / 下载重试 / 体积与类型校验）、对象存储删除、缓存序列化与 key 稳定性，
 以及一个 `@SpringBootTest` 上下文加载用例（校验 Bean 装配与循环依赖处理）。
 
@@ -390,7 +417,7 @@ mvn test
 
 ```bash
 cd front
-node smoke-test.mjs                  # 11 个模块真实 import + 首屏与空间页面渲染
+node smoke-test.mjs                  # 13 个模块真实 import + 首屏与空间页面渲染
 node e2e-test.mjs                    # 49 项真实后端回归
 API_BASE=http://localhost:8688/api node e2e-test.mjs   # 打其他后端地址
 ```
@@ -452,7 +479,7 @@ docker compose --env-file deploy/.env -f deploy/docker-compose.free.yml up -d --
 
 - **AI 图片编辑**：接入多模态模型，支持以文生图、局部重绘、智能扩图，并保留编辑历史可回滚
 - **图库分析**：图片内容自动打标与聚类，输出分类分布、上传趋势、存储占用等可视化报表
-- **团队空间**：空间成员与角色体系（拥有者 / 管理员 / 成员），空间级别的配额分配与操作审计
+- **团队空间增强**：空间级别的配额分配、成员操作审计日志、@提及与消息通知
 - **图片协同编辑**：多人同时编辑图片信息与标签，基于 WebSocket 做实时同步与冲突处理
 
 ---

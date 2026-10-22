@@ -27,7 +27,6 @@ import com.lsj.demo.service.UserService;
 import org.springframework.beans.BeanUtils;
 import org.springframework.stereotype.Service;
 
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -251,19 +250,6 @@ public class SpaceUserServiceImpl extends ServiceImpl<SpaceUserMapper, SpaceUser
         return this.getOne(new QueryWrapper<SpaceUser>()
                 .eq("spaceId", spaceId)
                 .eq("userId", userId));
-    }
-
-    @Override
-    public boolean hasRole(Long spaceId, Long userId, String... spaceRoles) {
-        SpaceUser spaceUser = getSpaceUser(spaceId, userId);
-        if (spaceUser == null) {
-            return false;
-        }
-        // 不传角色表示只要是成员即可
-        if (spaceRoles == null || spaceRoles.length == 0) {
-            return true;
-        }
-        return Arrays.asList(spaceRoles).contains(spaceUser.getSpaceRole());
     }
 
     /**

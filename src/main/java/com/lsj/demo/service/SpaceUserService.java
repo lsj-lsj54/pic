@@ -103,16 +103,4 @@ public interface SpaceUserService extends IService<SpaceUser> {
      * @return 成员记录，不存在返回 null
      */
     SpaceUser getSpaceUser(Long spaceId, Long userId);
-
-    /**
-     * 判断用户是否为空间成员，且角色在给定角色集合内
-     * <p>
-     * 权限校验工具类使用，避免各处手写查询。
-     *
-     * @param spaceId    空间 id
-     * @param userId     用户 id
-     * @param spaceRoles 允许的角色（不传表示只要是成员即可）
-     * @return 是否命中
-     */
-    boolean hasRole(Long spaceId, Long userId, String... spaceRoles);
 }
