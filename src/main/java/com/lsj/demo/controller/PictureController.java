@@ -19,6 +19,7 @@ import com.lsj.demo.model.enums.FileUploadEnum;
 import com.lsj.demo.model.vo.PictureVO;
 import com.lsj.demo.service.PictureService;
 import com.lsj.demo.service.SpaceService;
+import com.lsj.demo.service.SpaceUserService;
 import com.lsj.demo.service.UserService;
 import org.springframework.beans.BeanUtils;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -55,6 +56,12 @@ public class PictureController {
      */
     @Resource
     private SpaceService spaceService;
+
+    /**
+     * 空间成员服务：团队空间的图片权限按成员角色判定
+     */
+    @Resource
+    private SpaceUserService spaceUserService;
 
     /**
      * 上传图片（本地文件，可重新上传）
@@ -269,8 +276,8 @@ public class PictureController {
         long id = pictureEditRequest.getId();
         Picture oldPicture = pictureService.getById(id);
         ThrowUtils.throwIf(oldPicture == null, ErrorCode.NOT_FOUND_ERROR);
-        // 仅本人或管理员可编辑；图片在私有空间里时还要求是该空间的创建者
-        PicturePermissionUtils.checkPictureAuth(oldPicture, loginUser, userService, spaceService);
+        // 仅本人或管理员可编辑；图片在空间里时还要满足空间的权限规则（团队空间按成员角色放行）
+        PicturePermissionUtils.checkPictureAuth(oldPicture, loginUser, userService, spaceService, spaceUserService);
         // 补充审核参数
         pictureService.fillReviewParams(picture, loginUser);
         // 操作数据库
@@ -308,6 +315,20 @@ public class PictureController {
         User loginUser = userService.getLoginUser(request);
         int uploadCount = pictureService.uploadPictureByBatch(pictureUploadByBatchRequest, loginUser);
         return ResultUtils.success(uploadCount);
+    }
+
+    /**
+     * 修复存量图片的对象存储 ACL（设为公有读）
+     * <p>
+     * 历史上传的图片在私有桶里没有单独开公有读，浏览器直接访问 URL 会 403 导致裂图。
+     * 该接口遍历全部图片记录补设 ACL，仅需执行一次，之后新上传的图片会自动带上公有读。
+     */
+    @PostMapping("/fix/acl")
+    @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
+    public BaseResponse<Integer> fixPictureAcl(HttpServletRequest request) {
+        userService.getLoginUser(request);
+        int fixed = pictureService.fixAllPictureAcl();
+        return ResultUtils.success(fixed);
     }
 
 }

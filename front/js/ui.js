@@ -77,6 +77,52 @@ export function spaceLevelInfo(level) {
   return SPACE_LEVEL[level] || { text: '未知级别', cls: 'tag-pending' };
 }
 
+/** 空间类型：0-私有 1-团队（与后端 SpaceTypeEnum 一致） */
+export const SPACE_TYPE = {
+  0: { text: '私有', cls: 'tag-private' },
+  1: { text: '团队', cls: 'tag-team' },
+};
+
+/**
+ * 取空间类型的展示信息
+ *
+ * @param {number} type 类型值，null/undefined 按私有处理（兼容老数据）
+ * @returns {{text: string, cls: string}} 类型文案与样式类
+ */
+export function spaceTypeInfo(type) {
+  return SPACE_TYPE[type === null || type === undefined ? 0 : type]
+    || { text: '未知类型', cls: 'tag-pending' };
+}
+
+/** 空间角色（与后端 SpaceRoleEnum 一致） */
+export const SPACE_ROLE = {
+  viewer: { text: '浏览者', cls: 'tag-viewer' },
+  editor: { text: '编辑者', cls: 'tag-editor' },
+  admin: { text: '管理员', cls: 'tag-admin-role' },
+};
+
+/**
+ * 取空间角色的展示信息
+ *
+ * @param {string} role 角色值
+ * @returns {{text: string, cls: string}} 角色文案与样式类
+ */
+export function spaceRoleInfo(role) {
+  return SPACE_ROLE[role] || { text: '未知角色', cls: 'tag-pending' };
+}
+
+/**
+ * 空间角色下拉选项
+ *
+ * @param {string} selected 当前选中值
+ * @returns {string} option 列表 HTML
+ */
+export function spaceRoleOptions(selected = 'viewer') {
+  return Object.keys(SPACE_ROLE)
+    .map((role) => `<option value="${role}" ${role === selected ? 'selected' : ''}>${SPACE_ROLE[role].text}</option>`)
+    .join('');
+}
+
 /* ------------------------------ 轻提示 ------------------------------ */
 
 /** 各类型提示的图标，纯装饰（对读屏隐藏，语义靠 role 传达） */

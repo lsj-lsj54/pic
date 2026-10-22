@@ -144,6 +144,8 @@ export const userApi = {
     method: 'POST',
     body: cleanParams(query),
   }),
+  /** 按昵称/账号搜索用户（脱敏，供邀请成员时匹配候选） */
+  search: (keyword) => request(`/user/search?keyword=${encodeURIComponent(keyword)}`),
 };
 
 /* ------------------------------ 图片模块 ------------------------------ */
@@ -224,11 +226,17 @@ export const pictureApi = {
 /**
  * 空间接口
  * <p>
- * 规则与后端一致：空间只有创建者（或管理员）能查看和修改；
- * `spaceId` 为空表示公共空间，不为空表示对应的私有空间。
+ * 规则与后端一致：私有空间只有创建者（或管理员）能查看和修改；
+ * 团队空间（spaceType = 1）的成员按角色获得查看/操作权限；
+ * `spaceId` 为空表示公共空间，不为空表示对应的私有/团队空间。
  */
 export const spaceApi = {
-  /** 创建空间，返回新空间 id（普通用户只能创建普通版） */
+  /**
+   * 创建空间，返回新空间 id
+   * <p>
+   * data.spaceType：0-私有（默认） 1-团队；普通用户只能创建普通版，
+   * 且每种类型的空间只能创建一个。
+   */
   add: (data) => request('/space/add', { method: 'POST', body: data }),
   /** 编辑空间名称（创建者或管理员） */
   edit: (data) => request('/space/edit', { method: 'POST', body: data }),
@@ -257,6 +265,25 @@ export const spaceApi = {
   }),
   /** 空间级别字典：text / value / maxSize / maxCount */
   listLevel: () => request('/space/list/level'),
+};
+
+/**
+ * 团队成员接口
+ * <p>
+ * 仅团队空间（spaceType = 1）有成员概念。邀请/移除/改角色的权限由后端校验：
+ * 创建者与团队管理员可邀请和移除成员，仅创建者可调整角色，成员可移除自己（退出团队）。
+ */
+export const spaceUserApi = {
+  /** 邀请成员：{ spaceId, userId, spaceRole }，spaceRole 缺省为 viewer */
+  add: (data) => request('/space/user/add', { method: 'POST', body: data }),
+  /** 移除成员（传成员记录 id），也可用于退出团队 */
+  delete: (id) => request('/space/user/delete', { method: 'POST', body: { id } }),
+  /** 调整成员角色：{ id, spaceRole } */
+  edit: (data) => request('/space/user/edit', { method: 'POST', body: data }),
+  /** 查询空间成员列表：{ spaceId, spaceRole? } */
+  list: (query) => request('/space/user/list', { method: 'POST', body: cleanParams(query) }),
+  /** 查询当前用户加入的团队空间列表 */
+  listMy: () => request('/space/user/list/my', { method: 'POST', body: {} }),
 };
 
 /**

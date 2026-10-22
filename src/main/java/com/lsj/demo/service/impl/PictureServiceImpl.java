@@ -20,6 +20,7 @@ import com.lsj.demo.exception.BusinessException;
 import com.lsj.demo.exception.ErrorCode;
 import com.lsj.demo.exception.ThrowUtils;
 import com.lsj.demo.manager.CosManager;
+import cn.hutool.core.util.StrUtil;
 import com.lsj.demo.manager.factory.UploadFactory;
 import com.lsj.demo.manager.uplode.PictureUploadTemplate;
 import com.lsj.demo.model.dto.picture.PictureQueryRequest;
@@ -38,6 +39,7 @@ import com.lsj.demo.model.vo.UserVO;
 import com.lsj.demo.service.PictureService;
 import com.lsj.demo.utils.ColorUtils;
 import com.lsj.demo.service.SpaceService;
+import com.lsj.demo.service.SpaceUserService;
 import com.lsj.demo.service.UserService;
 import lombok.extern.slf4j.Slf4j;
 import org.jsoup.Jsoup;
@@ -107,6 +109,12 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
      */
     @Resource
     private SpaceService spaceService;
+
+    /**
+     * 空间成员服务：团队空间的图片权限按成员角色判定
+     */
+    @Resource
+    private SpaceUserService spaceUserService;
 
 
     @Resource
@@ -187,8 +195,8 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         if (pictureId != null) {
             oldPicture = this.getById(pictureId);
             ThrowUtils.throwIf(oldPicture == null, ErrorCode.NOT_FOUND_ERROR, "图片不存在");
-            // 仅本人或管理员可覆盖；图片在私有空间里时还要求是该空间的创建者
-            PicturePermissionUtils.checkPictureAuth(oldPicture, loginUser, userService, spaceService);
+            // 仅本人或管理员可覆盖；图片在空间里时还要满足空间的权限规则（团队空间按成员角色放行）
+            PicturePermissionUtils.checkPictureAuth(oldPicture, loginUser, userService, spaceService, spaceUserService);
         }
 
         // 目标空间：spaceId 为空表示公共空间，不为空表示上传到对应的私有空间
@@ -293,8 +301,8 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         }
         Space space = spaceService.getById(spaceId);
         ThrowUtils.throwIf(space == null, ErrorCode.NOT_FOUND_ERROR, "空间不存在");
-        // 非管理员只能往自己的空间里传图
-        SpacePermissionUtils.checkSpaceAuth(space, loginUser, userService);
+        // 私有空间只能往自己的空间里传图；团队空间 admin / editor 成员也可以传
+        SpacePermissionUtils.checkSpaceAuth(space, loginUser, userService, spaceUserService);
         return space;
     }
 
@@ -479,7 +487,8 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         Space space = spaceService.getById(spaceId);
         ThrowUtils.throwIf(space == null, ErrorCode.NOT_FOUND_ERROR, "空间不存在");
         // 未登录时 getLoginUserOrNull 返回 null，checkSpaceViewAuth 会按无权限处理
-        SpacePermissionUtils.checkSpaceViewAuth(space, userService.getLoginUserOrNull(request), userService);
+        SpacePermissionUtils.checkSpaceViewAuth(space, userService.getLoginUserOrNull(request),
+                userService, spaceUserService);
     }
 
     /**
@@ -505,10 +514,11 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
             // 公共图库：所有人可见，但只能看到已过审的图片
             pictureQueryRequest.setReviewStatus(PictureReviewStatusEnum.PASS.getValue());
         } else {
-            // 私有空间：不能查看别人的空间
+            // 私有空间：不能查看别人的空间；团队空间：成员可查看
             Space space = spaceService.getById(spaceId);
             ThrowUtils.throwIf(space == null, ErrorCode.NOT_FOUND_ERROR, "空间不存在");
-            SpacePermissionUtils.checkSpaceViewAuth(space, userService.getLoginUserOrNull(request), userService);
+            SpacePermissionUtils.checkSpaceViewAuth(space, userService.getLoginUserOrNull(request),
+                    userService, spaceUserService);
         }
         QueryWrapper<Picture> queryWrapper = this.getQueryWrapper(pictureQueryRequest);
         if (spaceId == null) {
@@ -960,8 +970,8 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         // 先取出记录，删掉之后就查不到 url 了
         Picture oldPicture = this.getById(pictureId);
         ThrowUtils.throwIf(oldPicture == null, ErrorCode.NOT_FOUND_ERROR, "图片不存在");
-        // 不能删别人空间里的图片
-        PicturePermissionUtils.checkPictureAuth(oldPicture, loginUser, userService, spaceService);
+        // 不能删别人空间里的图片；团队空间按成员角色放行
+        PicturePermissionUtils.checkPictureAuth(oldPicture, loginUser, userService, spaceService, spaceUserService);
 
         boolean result = this.removeById(pictureId);
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR, "删除失败");
@@ -1040,5 +1050,30 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
     @Override
     public void deleteBatchIds(List<Long> list) {
         removeByIds(list);
+    }
+
+    @Override
+    public int fixAllPictureAcl() {
+        List<Picture> pictures = list();
+        int fixed = 0;
+        for (Picture picture : pictures) {
+            try {
+                String url = picture.getUrl();
+                String key = cosManager.parseKeyFromUrl(url);
+                if (StrUtil.isNotBlank(key)) {
+                    cosManager.setPublicReadAcl(key);
+                }
+                String thumbnailUrl = picture.getThumbnailUrl();
+                // 缩略图可能与原图同 key（webp 源图），重复设置无害，跳过相同 key 省一次请求
+                String thumbnailKey = cosManager.parseKeyFromUrl(thumbnailUrl);
+                if (StrUtil.isNotBlank(thumbnailKey) && !thumbnailKey.equals(key)) {
+                    cosManager.setPublicReadAcl(thumbnailKey);
+                }
+                fixed++;
+            } catch (Exception e) {
+                log.error("修复图片 ACL 失败，pictureId = {}: {}", picture.getId(), e.getMessage());
+            }
+        }
+        return fixed;
     }
 }

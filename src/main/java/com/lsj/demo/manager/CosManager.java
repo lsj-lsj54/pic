@@ -9,10 +9,12 @@ import com.lsj.demo.conifg.CosClientConfig;
 import com.lsj.demo.utils.ColorUtils;
 import com.qcloud.cos.COSClient;
 import com.qcloud.cos.exception.CosClientException;
+import com.qcloud.cos.model.CannedAccessControlList;
 import com.qcloud.cos.model.COSObject;
 import com.qcloud.cos.model.GetObjectRequest;
 import com.qcloud.cos.model.PutObjectRequest;
 import com.qcloud.cos.model.PutObjectResult;
+import com.qcloud.cos.model.SetObjectAclRequest;
 import com.qcloud.cos.model.ciModel.persistence.PicOperations;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -44,7 +46,27 @@ public class CosManager {
     public PutObjectResult putObject(String key, File file) {
         PutObjectRequest putObjectRequest =
                 new PutObjectRequest(cosClientConfig.getBucket(), key, file);
-        return cosClient.putObject(putObjectRequest);
+        PutObjectResult result = cosClient.putObject(putObjectRequest);
+        setPublicReadAcl(key);
+        return result;
+    }
+
+    /**
+     * 给对象设置「公有读」权限
+     * <p>
+     * 存储桶本身是私有读，浏览器直接访问图片 URL 会 403（页面里看到的裂图就是它）。
+     * 图片这类静态资源需要匿名可读，所以在每次上传后单独把该对象设为公有读。
+     *
+     * @param key 对象 key
+     */
+    public void setPublicReadAcl(String key) {
+        try {
+            cosClient.setObjectAcl(new SetObjectAclRequest(
+                    cosClientConfig.getBucket(), key, CannedAccessControlList.PublicRead));
+        } catch (Exception e) {
+            // ACL 设置失败只记日志不抛出：文件已经传上去了，主流程不应因此失败
+            log.error("设置对象公有读权限失败，key = {}: {}", key, e.getMessage());
+        }
     }
 
     /**
@@ -66,7 +88,14 @@ public class CosManager {
         // 构造处理参数
         picOperations.setRules(buildCompressRules(key));
         putObjectRequest.setPicOperations(picOperations);
-        return cosClient.putObject(putObjectRequest);
+        PutObjectResult result = cosClient.putObject(putObjectRequest);
+        // 原图和压缩图都要公有读，否则页面上图会裂
+        setPublicReadAcl(key);
+        String webpKey = buildWebpKey(key);
+        if (!webpKey.equals(key)) {
+            setPublicReadAcl(webpKey);
+        }
+        return result;
     }
 
     /**

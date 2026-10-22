@@ -1,5 +1,6 @@
 package com.lsj.demo.service.impl;
 
+import cn.dev33.satoken.stp.StpUtil;
 import cn.hutool.core.util.RandomUtil;
 import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
@@ -24,11 +25,10 @@ import javax.servlet.http.HttpServletRequest;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 import java.util.stream.Collectors;
-
-import static com.lsj.demo.model.constant.UserConstant.USER_LOGIN_STATE;
 
 /**
  * @author lsj
@@ -195,8 +195,8 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
             log.info("user login failed, userAccount cannot match userPassword");
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "用户不存在或密码错误");
         }
-        // 3. 记录用户的登录态
-        request.getSession().setAttribute(USER_LOGIN_STATE, user);
+        // 3. 记录用户的登录态（改用 Sa-Token：以用户 id 作为登录凭证，会话存 Redis）
+        StpUtil.login(user.getId());
         return this.getLoginUserVO(user);
     }
 
@@ -220,15 +220,10 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
      */
     @Override
     public User getLoginUser(HttpServletRequest request) {
-        // 先判断是否已登录
-        Object userObj = request.getSession().getAttribute(USER_LOGIN_STATE);
-        User currentUser = (User) userObj;
-        if (currentUser == null || currentUser.getId() == null) {
-            throw new BusinessException(ErrorCode.NOT_LOGIN_ERROR);
-        }
-        // 从数据库查询（追求性能的话可以注释，直接返回上述结果）
-        long userId = currentUser.getId();
-        currentUser = this.getById(userId);
+        // 登录态由 Sa-Token 管理：StpUtil.getLoginIdAsLong() 未登录会抛 NotLoginException，
+        // 由全局异常处理器统一转成 NOT_LOGIN_ERROR，前端无需感知实现差异。
+        long userId = StpUtil.getLoginIdAsLong();
+        User currentUser = this.getById(userId);
         if (currentUser == null) {
             throw new BusinessException(ErrorCode.NOT_LOGIN_ERROR);
         }
@@ -243,13 +238,14 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
      */
     @Override
     public User getLoginUserOrNull(HttpServletRequest request) {
-        Object userObj = request.getSession().getAttribute(USER_LOGIN_STATE);
-        User currentUser = (User) userObj;
-        if (currentUser == null || currentUser.getId() == null) {
+        // 未登录时返回 null 而不抛异常，供「登录可见全部、未登录只看公开内容」的接口使用
+        try {
+            long userId = StpUtil.getLoginIdAsLong();
+            return this.getById(userId);
+        } catch (Exception e) {
+            // 未登录或 token 失效都返回 null
             return null;
         }
-        // 会话里的用户可能是旧数据（改过角色/已注销），以数据库为准
-        return this.getById(currentUser.getId());
     }
 
     /**
@@ -260,13 +256,8 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
      */
     @Override
     public boolean userLogout(HttpServletRequest request) {
-        // 先判断是否已登录
-        Object userObj = request.getSession().getAttribute(USER_LOGIN_STATE);
-        if (userObj == null) {
-            throw new BusinessException(ErrorCode.OPERATION_ERROR, "未登录");
-        }
-        // 移除登录态
-        request.getSession().removeAttribute(USER_LOGIN_STATE);
+        // 未登录时 StpUtil.logout 不会抛异常，直接返回 true 即可
+        StpUtil.logout();
         return true;
     }
 
@@ -335,6 +326,20 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
     @Override
     public boolean isAdmin(User user) {
         return user != null && UserRoleEnum.ADMIN.getValue().equals(user.getUserRole());
+    }
+
+    @Override
+    public List<UserVO> searchUserVO(String keyword, int limit) {
+        if (StrUtil.isBlank(keyword)) {
+            return Collections.emptyList();
+        }
+        int safeLimit = Math.max(1, Math.min(limit, 20));
+        QueryWrapper<User> queryWrapper = new QueryWrapper<>();
+        // 昵称或账号任一命中即可
+        queryWrapper.and(w -> w.like("userName", keyword).or().like("userAccount", keyword));
+        queryWrapper.last("limit " + safeLimit);
+        List<User> userList = this.list(queryWrapper);
+        return getUserVOList(userList);
     }
 }
 

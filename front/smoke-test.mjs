@@ -174,6 +174,23 @@ function installSpaceFetchStub() {
       result = { code: 0, data: spaceSample };
     } else if (target.includes('/picture/list/page/vo')) {
       result = { code: 0, data: { current: 1, size: 12, total: 0, records: [] } };
+    } else if (target.includes('/space/user/list')) {
+      // 团队空间的成员列表（spaceDetail 进入团队空间时调用）
+      result = {
+        code: 0,
+        data: [
+          {
+            id: '100',
+            spaceId: '10',
+            userId: '1',
+            spaceRole: 'admin',
+            user: { id: '1', userAccount: 'tester', userName: '测试用户' },
+          },
+        ],
+      };
+    } else if (target.includes('/space/user/list/my')) {
+      // 我加入的团队空间（列表页调用）
+      result = { code: 0, data: [] };
     }
     return {
       ok: true,

@@ -1,16 +1,18 @@
 /**
  * 空间详情页：查看某个空间的信息与其中的图片，支持上传、编辑、重新上传、删除
  * <p>
- * 只有空间创建者（或管理员）能进入：后端在查询空间和空间内图片时都会再做一次校验。
+ * 私有空间：仅创建者（或管理员）可进入与操作；
+ * 团队空间（spaceType=1）：成员按角色获得权限，viewer 只能查看，editor/admin 可上传/编辑/删除。
  */
-import { spaceApi, pictureApi } from '../api.js';
+import { spaceApi, pictureApi, spaceUserApi } from '../api.js';
 import {
-  $, $$, toast, escapeHtml, formatTime, formatSize, renderPager, renderEmpty,
-  confirmDialog, REVIEW_STATUS, spaceLevelInfo, renderSpaceUsage, normalizePage,
-  renderSkeleton, revealOnScroll, bindImageFade, attachRippleAll, attachRipple,
+  $, $$, state, toast, escapeHtml, formatTime, formatSize, renderPager, renderEmpty,
+  confirmDialog, REVIEW_STATUS, spaceLevelInfo, spaceTypeInfo, renderSpaceUsage,
+  normalizePage, renderSkeleton, revealOnScroll, bindImageFade, attachRippleAll, attachRipple,
 } from '../ui.js';
 import { openPictureDetail, openEditModal, openUploadModal, thumbUrl } from '../components/picture.js';
 import { openLightbox } from '../components/lightbox.js';
+import { openSpaceMemberModal } from '../components/spaceMember.js';
 import { navigate } from '../app.js';
 
 /** 每页数量，后端限制不能超过 20 */
@@ -19,6 +21,9 @@ const PAGE_SIZE = 12;
 /** 当前空间，render 时从路由参数写入 */
 let currentSpace = null;
 
+/** 当前登录用户在该团队空间中的角色 */
+let mySpaceRole = null;
+
 const query = {
   current: 1,
   pageSize: PAGE_SIZE,
@@ -26,20 +31,71 @@ const query = {
   sortOrder: 'descend',
 };
 
-/** 渲染空间信息（名称、级别、用量） */
+/** 当前用户是否为空间创建者 */
+function isCreator() {
+  if (!state.isLogin() || !currentSpace) return false;
+  return String(currentSpace.userId) === String(state.currentUser.id);
+}
+
+/** 当前用户是否有空间内图片的操作权限（上传/编辑/删除） */
+function canOperateInSpace() {
+  if (isCreator() || state.isAdmin()) return true;
+  if (Number(currentSpace.spaceType) !== 1) return false;
+  return mySpaceRole === 'admin' || mySpaceRole === 'editor';
+}
+
+/** 渲染空间信息（名称、级别、类型、用量） */
 function renderSpaceInfo(el, space) {
   const info = $('#space-info', el);
-  if (!info) {
-    return;
-  }
+  if (!info) return;
   const level = spaceLevelInfo(space.spaceLevel);
+  const type = spaceTypeInfo(space.spaceType);
+  const isTeam = Number(space.spaceType) === 1;
+  const memberBtn = isTeam
+    ? `<button class="btn btn-sm" id="member-manage-btn" type="button">成员管理</button>`
+    : '';
   info.innerHTML = `
     <div class="space-detail-head">
       <h2 class="page-title">${escapeHtml(space.spaceName)}</h2>
-      <span class="tag ${level.cls}">${level.text}</span>
+      <div class="space-tags">
+        <span class="tag ${level.cls}">${level.text}</span>
+        <span class="tag ${type.cls}">${type.text}</span>
+      </div>
+      ${memberBtn}
       <a class="btn btn-sm" href="#/analyze?spaceId=${space.id}">查看分析</a>
     </div>
     ${renderSpaceUsage(space)}`;
+  if (isTeam) {
+    $('#member-manage-btn', info)?.addEventListener('click', () => {
+      openSpaceMemberModal(currentSpace, { onChanged: () => initMyRole(el) });
+    });
+  }
+}
+
+/** 初始化当前用户在团队空间中的角色（私有空间不查） */
+async function initMyRole(el) {
+  mySpaceRole = null;
+  if (!currentSpace || Number(currentSpace.spaceType) !== 1) return;
+  if (isCreator()) {
+    mySpaceRole = 'admin';
+    return;
+  }
+  if (!state.isLogin()) return;
+  try {
+    const list = await spaceUserApi.list({ spaceId: currentSpace.id });
+    const me = list.find((m) => String(m.userId) === String(state.currentUser.id));
+    mySpaceRole = me ? me.spaceRole : null;
+    updateUploadButton(el);
+  } catch (e) {
+    // 静默失败：后端会在操作时再校验，无角色则不展示操作按钮
+  }
+}
+
+/** 根据角色控制「上传图片」按钮显隐 */
+function updateUploadButton(el) {
+  const btn = $('#upload-btn', el);
+  if (!btn) return;
+  btn.style.display = canOperateInSpace() ? '' : 'none';
 }
 
 /** 重新加载空间信息：上传、删除后用量会变，必须刷新进度条 */
@@ -47,6 +103,7 @@ async function loadSpace(el) {
   try {
     currentSpace = await spaceApi.getVOById(currentSpace.id);
     renderSpaceInfo(el, currentSpace);
+    await initMyRole(el);
   } catch (e) {
     $('#space-info', el).innerHTML = renderEmpty(e.message);
   }
@@ -73,9 +130,7 @@ function reload(el) {
 /** 删除空间内的图片 */
 async function removePicture(el, id) {
   const confirmed = await confirmDialog('删除后无法恢复，确定要删除这张图片吗？');
-  if (!confirmed) {
-    return;
-  }
+  if (!confirmed) return;
   try {
     await pictureApi.delete(id);
     toast('删除成功', 'success');
@@ -90,6 +145,7 @@ function renderGrid(el, page) {
   const records = page.records || [];
   const grid = $('#grid', el);
   const pager = $('#pager', el);
+  const operable = canOperateInSpace();
 
   if (records.length === 0) {
     grid.innerHTML = renderEmpty('这个空间还没有图片，点右上角「上传图片」放几张进来');
@@ -99,6 +155,12 @@ function renderGrid(el, page) {
 
   grid.innerHTML = records.map((item) => {
     const review = REVIEW_STATUS[item.reviewStatus] || { text: '未知', cls: 'tag-pending' };
+    const actionBtns = operable
+      ? `
+          <button class="btn btn-sm" data-action="edit" type="button">编辑</button>
+          <button class="btn btn-sm" data-action="reupload" type="button">重传</button>
+          <button class="btn btn-sm btn-danger" data-action="delete" type="button">删除</button>`
+      : '';
     return `
       <article class="card reveal" data-id="${item.id}">
         <div class="card-img">
@@ -115,9 +177,7 @@ function renderGrid(el, page) {
         </div>
         <div class="card-actions">
           <button class="btn btn-sm" data-action="detail" type="button">查看</button>
-          <button class="btn btn-sm" data-action="edit" type="button">编辑</button>
-          <button class="btn btn-sm" data-action="reupload" type="button">重传</button>
-          <button class="btn btn-sm btn-danger" data-action="delete" type="button">删除</button>
+          ${actionBtns}
         </div>
       </article>`;
   }).join('');
@@ -131,7 +191,6 @@ function renderGrid(el, page) {
         return;
       }
       if (action === 'edit') {
-        // 空间里的图片都是自己的，直接查看详情后编辑即可
         try {
           const picture = await pictureApi.getVOById(id);
           openEditModal(picture, { onSuccess: () => reload(el) });
@@ -141,7 +200,6 @@ function renderGrid(el, page) {
         return;
       }
       if (action === 'reupload') {
-        // 带上 spaceId，覆盖上传后图片仍留在当前空间
         openUploadModal({
           pictureId: id,
           spaceId: currentSpace.id,
@@ -164,9 +222,7 @@ function renderGrid(el, page) {
   $$('[data-page]', pager).forEach((btn) => {
     btn.addEventListener('click', () => {
       const target = Number(btn.dataset.page);
-      if (target < 1) {
-        return;
-      }
+      if (target < 1) return;
       query.current = target;
       loadPictures(el);
     });
@@ -203,6 +259,7 @@ export default {
       return;
     }
     currentSpace = { id: spaceId };
+    mySpaceRole = null;
     query.current = 1;
 
     el.innerHTML = `
@@ -232,10 +289,11 @@ export default {
       .then((space) => {
         currentSpace = space;
         renderSpaceInfo(el, space);
-        loadPictures(el);
+        updateUploadButton(el);
+        return initMyRole(el).then(() => loadPictures(el));
       })
       .catch((e) => {
-        $('#space-info', el).innerHTML = renderEmpty(`${e.message}（可能是空间已被删除，或不属于你）`);
+        $('#space-info', el).innerHTML = renderEmpty(`${e.message}（可能是空间已被删除，或你没有权限）`);
         $('#grid', el).innerHTML = '';
       });
   },

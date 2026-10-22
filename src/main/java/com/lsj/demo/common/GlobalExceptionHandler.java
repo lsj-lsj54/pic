@@ -1,5 +1,8 @@
 package com.lsj.demo.common;
 
+import cn.dev33.satoken.exception.NotLoginException;
+import cn.dev33.satoken.exception.NotPermissionException;
+import cn.dev33.satoken.exception.NotRoleException;
 import com.lsj.demo.exception.BusinessException;
 import com.lsj.demo.exception.ErrorCode;
 import lombok.extern.slf4j.Slf4j;
@@ -24,6 +27,33 @@ public class GlobalExceptionHandler {
     public BaseResponse<?> businessExceptionHandler(BusinessException e) {
         log.error("BusinessException", e);
         return ResultUtils.error(e.getCode(), e.getMessage());
+    }
+
+    /**
+     * 处理 Sa-Token 未登录异常（登录态失效 / 未携带 token）
+     */
+    @ExceptionHandler(NotLoginException.class)
+    public BaseResponse<?> notLoginExceptionHandler(NotLoginException e) {
+        log.warn("NotLoginException: {}", e.getMessage());
+        return ResultUtils.error(ErrorCode.NOT_LOGIN_ERROR, "未登录或登录已过期");
+    }
+
+    /**
+     * 处理 Sa-Token 无权限异常（权限码校验失败）
+     */
+    @ExceptionHandler(NotPermissionException.class)
+    public BaseResponse<?> notPermissionExceptionHandler(NotPermissionException e) {
+        log.warn("NotPermissionException: {}", e.getMessage());
+        return ResultUtils.error(ErrorCode.NO_AUTH_ERROR, "无权限");
+    }
+
+    /**
+     * 处理 Sa-Token 无角色异常（全局角色校验失败）
+     */
+    @ExceptionHandler(NotRoleException.class)
+    public BaseResponse<?> notRoleExceptionHandler(NotRoleException e) {
+        log.warn("NotRoleException: {}", e.getMessage());
+        return ResultUtils.error(ErrorCode.NO_AUTH_ERROR, "无权限");
     }
 
     /**

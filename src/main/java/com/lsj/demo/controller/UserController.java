@@ -227,4 +227,20 @@ public class UserController {
         return ResultUtils.success(userVOPage);
     }
 
+    /**
+     * 按昵称或账号搜索用户（脱敏返回，供邀请团队成员时匹配候选）
+     * <p>
+     * 仅登录用户可调用；不返回密码等敏感字段，最多返回 20 条。
+     *
+     * @param keyword 搜索关键字（匹配昵称或账号，模糊）
+     * @param request request 请求
+     * @return 匹配的用户脱敏列表
+     */
+    @GetMapping("/search")
+    public BaseResponse<List<UserVO>> searchUser(String keyword, HttpServletRequest request) {
+        // 仅要求登录，非管理员也能用（邀请成员需要）
+        userService.getLoginUser(request);
+        return ResultUtils.success(userService.searchUserVO(keyword, 20));
+    }
+
 }

@@ -170,4 +170,14 @@ public interface PictureService extends IService<Picture> {
     List<Picture> getListPictureBySpaceId(Space space);
 
     void deleteBatchIds(List<Long> list);
+
+    /**
+     * 修复存量图片的对象存储 ACL（设为公有读）
+     * <p>
+     * 历史上传的图片没有设置公有读权限，浏览器直接访问 URL 会 403 导致裂图。
+     * 该方法遍历全部图片记录，对原图和缩略图逐一补设 ACL。
+     *
+     * @return 成功处理的图片条数
+     */
+    int fixAllPictureAcl();
 }

@@ -20,6 +20,7 @@ import com.lsj.demo.model.entity.User;
 import com.lsj.demo.model.enums.SpaceLevelEnum;
 import com.lsj.demo.model.vo.SpaceVO;
 import com.lsj.demo.service.SpaceService;
+import com.lsj.demo.service.SpaceUserService;
 import com.lsj.demo.service.UserService;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -55,6 +56,11 @@ public class SpaceController {
     private final SpaceService spaceService;
 
     private final UserService userService;
+
+    /**
+     * 空间成员服务：团队空间的查看、编辑权限按成员角色判定
+     */
+    private final SpaceUserService spaceUserService;
 
     /**
      * 创建空间
@@ -142,8 +148,8 @@ public class SpaceController {
         User loginUser = userService.getLoginUser(request);
         Space oldSpace = spaceService.getById(spaceEditRequest.getId());
         ThrowUtils.throwIf(oldSpace == null, ErrorCode.NOT_FOUND_ERROR, "空间不存在");
-        // 只能改自己的空间
-        SpacePermissionUtils.checkSpaceAuth(oldSpace, loginUser, userService);
+        // 私有空间只能改自己的；团队空间 admin / editor 成员也可以改名
+        SpacePermissionUtils.checkSpaceAuth(oldSpace, loginUser, userService, spaceUserService);
         Space space = new Space();
         space.setId(spaceEditRequest.getId());
         space.setSpaceName(spaceEditRequest.getSpaceName());
@@ -182,8 +188,8 @@ public class SpaceController {
         Space space = spaceService.getById(id);
         ThrowUtils.throwIf(space == null, ErrorCode.NOT_FOUND_ERROR, "空间不存在");
         User loginUser = userService.getLoginUser(request);
-        // 不能查看别人的空间
-        SpacePermissionUtils.checkSpaceViewAuth(space, loginUser, userService);
+        // 不能查看别人的私有空间；团队空间成员可查看
+        SpacePermissionUtils.checkSpaceViewAuth(space, loginUser, userService, spaceUserService);
         return ResultUtils.success(spaceService.getSpaceVO(space, request));
     }
 

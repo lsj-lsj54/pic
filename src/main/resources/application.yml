@@ -36,6 +36,31 @@ spring:
     #   - 部署时用环境变量 SPRING_DATASOURCE_USERNAME / SPRING_DATASOURCE_PASSWORD（见 deploy/docker-compose.yml）
     username: ${MYSQL_USERNAME:root}
     password: ${MYSQL_PASSWORD:}
+# Sa-Token 配置
+# 登录态改用 Sa-Token 管理：登录后 token 写入 Cookie（satoken），前端沿用 credentials: 'include'，
+# 无需改动前端即可维持登录态。会话数据存 Redis（sa-token-redis-jackson）。
+sa-token:
+  # token 名称（同时也是 Cookie 名与请求头名）
+  token-name: satoken
+  # token 有效期（秒），默认 30 天
+  timeout: 2592000
+  # token 最低活跃频率（秒），-1 表示不限制
+  active-timeout: -1
+  # 是否允许同一账号多地同时登录
+  is-concurrent: true
+  # 多人登录共享一个 token / 各自独立 token
+  is-share: true
+  # token 风格：uuid
+  token-style: uuid
+  # 是否输出操作日志
+  is-log: false
+  # 是否从 Cookie 中读取 token（前端 credentials: include 携带）
+  is-read-cookie: true
+  # 是否在登录成功后把 token 写入 Cookie 返回给前端
+  is-write-cookie: true
+  # 关闭 Sa-Token 默认的同源校验（跨域场景由 CorsConfig 统一处理）
+  is-check-same-token: false
+
 mybatis-plus:
   configuration:
     map-underscore-to-camel-case: false

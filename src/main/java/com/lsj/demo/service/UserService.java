@@ -122,5 +122,16 @@ public interface UserService extends IService<User> {
      */
     boolean isAdmin(User user);
 
+    /**
+     * 按昵称或账号模糊搜索用户（脱敏返回）
+     * <p>
+     * 供邀请团队成员时按昵称/账号匹配候选使用，仅登录用户可调用。
+     * 不返回密码等敏感字段，最多返回 limit 条。
+     *
+     * @param keyword 搜索关键字（匹配昵称或账号）
+     * @param limit   返回条数上限
+     * @return 脱敏用户列表
+     */
+    List<UserVO> searchUserVO(String keyword, int limit);
 
 }

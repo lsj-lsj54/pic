@@ -1,16 +1,19 @@
 /**
  * 我的空间页：空间列表、创建、重命名、删除、进入空间
  * <p>
- * 空间是图片的私有容器：spaceId 为空的是公共图库，任何人可见；
- * 这里的每个空间都只对创建者（和管理员）可见，空间内的图片同理。
+ * 空间分为私有空间（spaceType=0）和团队空间（spaceType=1）：
+ * - 每个用户最多只能创建一个私有空间和一个团队空间；
+ * - 团队空间可以邀请其他成员协作，成员按角色获得权限；
+ * - 我加入的团队空间单独列在下方，与「我创建的空间」区分开。
  */
-import { spaceApi } from '../api.js';
+import { spaceApi, spaceUserApi } from '../api.js';
 import {
   $, $$, state, toast, escapeHtml, formatTime, renderPager, renderEmpty,
   confirmDialog, showModal, closeModal, getFormValues, spaceLevelInfo,
-  spaceLevelOptions, renderSpaceUsage, normalizePage,
+  spaceLevelOptions, spaceTypeInfo, spaceRoleInfo, renderSpaceUsage, normalizePage,
   renderSkeleton, revealOnScroll, attachRippleAll,
 } from '../ui.js';
+import { openSpaceMemberModal } from '../components/spaceMember.js';
 import { navigate } from '../app.js';
 
 /** 每页数量 */
@@ -23,7 +26,7 @@ const query = {
   sortOrder: 'descend',
 };
 
-/** 拉取当前用户自己的空间 */
+/** 拉取当前用户自己创建的空间 */
 async function load(el) {
   const grid = $('#grid', el);
   grid.innerHTML = renderSkeleton(PAGE_SIZE);
@@ -49,11 +52,16 @@ function renderGrid(el, page) {
 
   grid.innerHTML = records.map((item) => {
     const level = spaceLevelInfo(item.spaceLevel);
+    const type = spaceTypeInfo(item.spaceType);
+    const isTeam = Number(item.spaceType) === 1;
     return `
-      <article class="space-card reveal" data-id="${item.id}">
+      <article class="space-card reveal" data-id="${item.id}" data-type="${item.spaceType || 0}">
         <div class="space-card-head">
           <h3 class="space-name" title="${escapeHtml(item.spaceName)}">${escapeHtml(item.spaceName)}</h3>
-          <span class="tag ${level.cls}">${level.text}</span>
+          <div class="space-tags">
+            <span class="tag ${level.cls}">${level.text}</span>
+            <span class="tag ${type.cls}">${type.text}</span>
+          </div>
         </div>
         ${renderSpaceUsage(item)}
         <div class="space-card-meta">
@@ -61,6 +69,7 @@ function renderGrid(el, page) {
         </div>
         <div class="card-actions">
           <button class="btn btn-sm btn-primary" data-action="open" type="button">进入空间</button>
+          ${isTeam ? '<button class="btn btn-sm" data-action="members" type="button">成员</button>' : ''}
           <button class="btn btn-sm" data-action="edit" type="button">重命名</button>
           <button class="btn btn-sm btn-danger" data-action="delete" type="button">删除</button>
         </div>
@@ -79,6 +88,10 @@ function renderGrid(el, page) {
       }
       if (action === 'edit') {
         openEditModal(el, space);
+        return;
+      }
+      if (action === 'members') {
+        openSpaceMemberModal(space, { onChanged: () => load(el) });
         return;
       }
       if (action === 'delete') {
@@ -121,13 +134,18 @@ function openCreateModal(el) {
                  placeholder="例如：我的旅行照片" autocomplete="off">
         </label>
         <label class="field">
+          <span>空间类型</span>
+          <select name="spaceType">
+            <option value="0">私有空间（仅自己可见）</option>
+            <option value="1">团队空间（可邀请成员协作）</option>
+          </select>
+        </label>
+        <label class="field">
           <span>空间级别</span>
           <select name="spaceLevel">${spaceLevelOptions(0, onlyCommon)}</select>
         </label>
         <p class="form-tip" id="space-tip">
-          ${onlyCommon
-    ? '普通用户只能创建普通版空间（100 张 / 100MB），升级请联系管理员。'
-    : '级别决定图片数量与容量上限，创建后限额自动填好。'}
+          每个用户最多创建一个私有空间和一个团队空间；普通用户只能创建普通版。
         </p>
         <div class="modal-foot">
           <button class="btn" type="button" data-modal-close>取消</button>
@@ -142,6 +160,7 @@ function openCreateModal(el) {
     try {
       await spaceApi.add({
         spaceName: values.spaceName,
+        spaceType: Number(values.spaceType) || 0,
         spaceLevel: Number(values.spaceLevel) || 0,
       });
       closeModal();
@@ -204,6 +223,82 @@ async function removeSpace(el, space) {
   }
 }
 
+/** 加载并渲染「我加入的团队空间」 */
+async function loadJoined(el) {
+  const container = $('#joined-section', el);
+  if (!container) return;
+  container.innerHTML = `<div class="loading">加载中…</div>`;
+  try {
+    const data = await spaceUserApi.listMy();
+    renderJoined(container, data || []);
+  } catch (e) {
+    container.innerHTML = renderEmpty(e.message);
+  }
+}
+
+/** 渲染我加入的团队空间 */
+function renderJoined(container, list) {
+  if (list.length === 0) {
+    container.innerHTML = renderEmpty('还没有加入任何团队空间');
+    return;
+  }
+  container.innerHTML = list.map((item) => {
+    const space = item.space || {};
+    const role = item.spaceRole ? spaceRoleInfo(item.spaceRole) : { text: '成员', cls: 'tag-viewer' };
+    return `
+      <article class="space-card reveal joined-card" data-id="${space.id}">
+        <div class="space-card-head">
+          <h3 class="space-name" title="${escapeHtml(space.spaceName || '')}">${escapeHtml(space.spaceName || '')}</h3>
+          <span class="tag ${role.cls}">我的角色：${role.text}</span>
+        </div>
+        ${renderSpaceUsage(space)}
+        <div class="space-card-meta">
+          <span>创建于 ${formatTime(space.createTime)}</span>
+        </div>
+        <div class="card-actions">
+          <button class="btn btn-sm btn-primary" data-action="open" type="button">进入空间</button>
+          <button class="btn btn-sm btn-danger" data-action="quit" type="button">退出团队</button>
+        </div>
+      </article>`;
+  }).join('');
+
+  $$('[data-action]', container).forEach((btn) => {
+    const card = btn.closest('.joined-card');
+    const id = card.dataset.id;
+    const item = list.find((i) => String(i.space?.id || i.spaceId) === String(id));
+    btn.addEventListener('click', () => {
+      const action = btn.dataset.action;
+      if (action === 'open') {
+        navigate('/space/detail', { id });
+        return;
+      }
+      if (action === 'quit') {
+        quitTeam(item, container);
+      }
+    });
+  });
+
+  revealOnScroll(container);
+  attachRippleAll(container);
+}
+
+/** 退出团队 */
+async function quitTeam(item, container) {
+  if (!item || !item.id) {
+    toast('缺少成员记录', 'error');
+    return;
+  }
+  const confirmed = await confirmDialog('退出团队后将无法查看该空间的图片，确定继续吗？', '退出团队');
+  if (!confirmed) return;
+  try {
+    await spaceUserApi.delete(item.id);
+    toast('已退出团队', 'success');
+    loadJoined(container.closest('#view-space'));
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
 export default {
   /**
    * 渲染我的空间页
@@ -215,17 +310,21 @@ export default {
       <section class="toolbar">
         <div class="toolbar-left">
           <h2 class="page-title">我的空间</h2>
-          <span class="page-sub">把图片按主题分空间管理，每个空间只有你能看到</span>
+          <span class="page-sub">把图片按主题分空间管理，团队空间可邀请成员协作</span>
         </div>
         <div class="toolbar-right">
           <button class="btn btn-primary" id="create-space-btn" type="button">创建空间</button>
         </div>
       </section>
+      <h3 class="section-title">我创建的空间</h3>
       <section id="grid" class="space-grid"></section>
-      <div id="pager"></div>`;
+      <div id="pager"></div>
+      <h3 class="section-title">我加入的团队空间</h3>
+      <section id="joined-section" class="space-grid"></section>`;
 
     $('#create-space-btn', el).addEventListener('click', () => openCreateModal(el));
 
     load(el);
+    loadJoined(el);
   },
 };

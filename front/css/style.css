@@ -1294,6 +1294,181 @@ h1, h2, h3 {
   color: #b45309;
 }
 
+/* 空间类型标签 */
+.tag-private {
+  background: #eef3fe;
+  color: var(--primary);
+}
+
+.tag-team {
+  background: #e8f8f0;
+  color: #0d7d3a;
+}
+
+/* 空间角色标签 */
+.tag-viewer {
+  background: #f3f4f6;
+  color: #4b5563;
+}
+
+.tag-editor {
+  background: #e0f2fe;
+  color: #0369a1;
+}
+
+.tag-admin-role {
+  background: #fef3c7;
+  color: #b45309;
+}
+
+/* 空间卡片中的标签组 */
+.space-tags {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* 我加入的团队空间卡片（在列表页复用 space-card 样式） */
+.joined-card {
+  border: 1px solid #e5e7eb;
+}
+
+/* 成员管理弹窗 */
+.member-body {
+  min-width: 320px;
+  max-width: 520px;
+}
+
+.member-invite {
+  padding-bottom: 16px;
+  border-bottom: 1px solid #e5e7eb;
+  margin-bottom: 16px;
+}
+
+.member-invite .form-row {
+  display: flex;
+  gap: 12px;
+  align-items: flex-end;
+}
+
+.member-invite .form-row .field {
+  flex: 1;
+  margin: 0;
+}
+
+.member-invite .btn {
+  flex-shrink: 0;
+}
+
+.member-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 360px;
+  overflow-y: auto;
+}
+
+.member-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  background: #f9fafb;
+  border-radius: var(--radius);
+}
+
+.member-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.member-name {
+  font-weight: 500;
+  color: var(--text);
+}
+
+.member-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.member-role-select {
+  padding: 5px 8px;
+  border: 1px solid #d1d5db;
+  border-radius: var(--radius);
+  background: #fff;
+  font-size: 13px;
+  color: var(--text-main);
+}
+
+/* 邀请用户搜索候选下拉 */
+.invite-user-field {
+  position: relative;
+}
+
+.invite-candidates {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  margin-top: 4px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
+  max-height: 240px;
+  overflow-y: auto;
+  z-index: 30;
+}
+
+.invite-candidates.hidden {
+  display: none;
+}
+
+.invite-candidate {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 12px;
+  border: none;
+  background: #fff;
+  cursor: pointer;
+  text-align: left;
+  font-size: 14px;
+  transition: background 0.15s;
+}
+
+.invite-candidate:hover:not(:disabled) {
+  background: #eef3fe;
+}
+
+.invite-candidate:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.candidate-name {
+  font-weight: 500;
+  color: var(--text);
+}
+
+.candidate-account {
+  font-size: 12px;
+  color: var(--text-sub);
+}
+
+.invite-candidate-empty {
+  padding: 10px 12px;
+  font-size: 13px;
+  color: var(--text-sub);
+}
+
 /* 上传弹窗里的空间提示 */
 .upload-space-tip {
   margin: 0 0 12px;

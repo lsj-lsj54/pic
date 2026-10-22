@@ -21,6 +21,7 @@ import com.lsj.demo.model.vo.space.SpaceTagAnalyzeVO;
 import com.lsj.demo.model.vo.space.SpaceTrendAnalyzeVO;
 import com.lsj.demo.model.vo.space.SpaceUsageAnalyzeVO;
 import com.lsj.demo.service.SpaceAnalyzeService;
+import com.lsj.demo.service.SpaceUserService;
 import com.lsj.demo.service.UserService;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -61,6 +62,11 @@ public class SpaceAnalyzeServiceImpl implements SpaceAnalyzeService {
     private final SpaceMapper spaceMapper;
 
     private final UserService userService;
+
+    /**
+     * 空间成员服务：团队空间的分析权限对成员开放
+     */
+    private final SpaceUserService spaceUserService;
 
     @Override
     public SpaceUsageAnalyzeVO usage(SpaceAnalyzeRequest analyzeRequest, User loginUser) {
@@ -268,7 +274,7 @@ public class SpaceAnalyzeServiceImpl implements SpaceAnalyzeService {
     }
 
     /**
-     * 分析权限校验：指定空间仅创建者（或管理员）可看，全部空间仅管理员
+     * 分析权限校验：指定空间仅创建者、团队成员（或管理员）可看，全部空间仅管理员
      */
     private void checkAnalyzeAuth(SpaceAnalyzeRequest analyzeRequest, User loginUser) {
         ThrowUtils.throwIf(analyzeRequest == null, ErrorCode.PARAMS_ERROR);
@@ -276,7 +282,7 @@ public class SpaceAnalyzeServiceImpl implements SpaceAnalyzeService {
                 ErrorCode.NOT_LOGIN_ERROR, "未登录");
         if (analyzeRequest.getSpaceId() != null) {
             Space space = spaceMapper.selectById(analyzeRequest.getSpaceId());
-            SpacePermissionUtils.checkSpaceViewAuth(space, loginUser, userService);
+            SpacePermissionUtils.checkSpaceViewAuth(space, loginUser, userService, spaceUserService);
         } else if (!userService.isAdmin(loginUser)) {
             throw new BusinessException(ErrorCode.NO_AUTH_ERROR, "仅管理员可分析全部空间");
         }

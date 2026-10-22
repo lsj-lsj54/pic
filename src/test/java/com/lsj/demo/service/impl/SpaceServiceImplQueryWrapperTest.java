@@ -7,6 +7,7 @@ import com.lsj.demo.model.entity.Space;
 import com.lsj.demo.model.entity.User;
 import com.lsj.demo.model.vo.SpaceVO;
 import com.lsj.demo.model.vo.UserVO;
+import com.lsj.demo.service.SpaceUserService;
 import com.lsj.demo.service.UserService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -36,8 +37,8 @@ class SpaceServiceImplQueryWrapperTest {
 
     private final UserService userService = mock(UserService.class);
 
-    /** TransactionTemplate 只在真正写库时才会用到，构造查询条件不需要 */
-    private final SpaceServiceImpl spaceService = new SpaceServiceImpl(userService, null);
+    /** TransactionTemplate / SpaceUserService 只在真正写库时才会用到，构造查询条件不需要 */
+    private final SpaceServiceImpl spaceService = new SpaceServiceImpl(userService, null, null);
 
     private Space space(long id, String name, Long userId) {
         Space space = new Space();

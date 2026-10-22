@@ -13,6 +13,7 @@ import com.lsj.demo.model.vo.space.SpaceSizeAnalyzeVO;
 import com.lsj.demo.model.vo.space.SpaceTagAnalyzeVO;
 import com.lsj.demo.model.vo.space.SpaceTrendAnalyzeVO;
 import com.lsj.demo.model.vo.space.SpaceUsageAnalyzeVO;
+import com.lsj.demo.service.SpaceUserService;
 import com.lsj.demo.service.UserService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -81,7 +82,8 @@ class SpaceAnalyzeServiceImplTest {
         when(pictureMapper.selectMaps(any(Wrapper.class))).thenReturn(new ArrayList<>());
         when(pictureMapper.selectObjs(any(Wrapper.class))).thenReturn(new ArrayList<>());
 
-        analyzeService = new SpaceAnalyzeServiceImpl(pictureMapper, spaceMapper, userService);
+        analyzeService = new SpaceAnalyzeServiceImpl(pictureMapper, spaceMapper, userService,
+                mock(SpaceUserService.class));
     }
 
     /** 取出传给 mapper 的查询条件 SQL（WHERE / GROUP BY / ORDER BY） */
