@@ -2,7 +2,8 @@
  * 后端接口封装
  * <p>
  * 后端 context-path 为 /api，跨域配置已开启 allowCredentials，
- * 因此所有请求都要带上 credentials: 'include'（携带 JSESSIONID 维持登录态）。
+ * 因此所有请求都要带上 credentials: 'include'（携带 satoken Cookie 维持登录态）。
+ * 该 Cookie 已开启 HttpOnly，JS 读取不到，也不需要读——登录态由浏览器自动带上。
  */
 
 /**

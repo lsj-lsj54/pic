@@ -8,6 +8,7 @@ import com.lsj.demo.common.ResultUtils;
 import com.lsj.demo.exception.BusinessException;
 import com.lsj.demo.exception.ErrorCode;
 import com.lsj.demo.exception.ThrowUtils;
+import com.lsj.demo.manager.auth.StpKit;
 import com.lsj.demo.model.constant.UserConstant;
 import com.lsj.demo.model.dto.user.UserAddRequest;
 import com.lsj.demo.model.dto.user.UserLoginRequest;
@@ -19,6 +20,7 @@ import com.lsj.demo.model.entity.User;
 import com.lsj.demo.model.vo.LoginUserVO;
 import com.lsj.demo.model.vo.UserVO;
 import com.lsj.demo.service.UserService;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -29,12 +31,14 @@ import org.springframework.web.bind.annotation.RestController;
 import javax.annotation.Resource;
 import javax.servlet.http.HttpServletRequest;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * 用户模块接口
  *
  * @author lsj
  */
+@Slf4j
 @RestController
 @RequestMapping("/user")
 public class UserController {
@@ -185,6 +189,10 @@ public class UserController {
         ThrowUtils.throwIf(!exists, ErrorCode.NOT_FOUND_ERROR, "用户不存在");
         boolean result = userService.removeById(deleteRequest.getId());
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
+        // 清掉该用户所有端口的 token 与会话。
+        // 只删库是不够的：StpInterfaceImpl 算权限时优先取会话里的 User 快照，
+        // 快照还在就能继续通过空间权限注解，直到 30 天后 token 自然过期。
+        logoutQuietly(deleteRequest.getId());
         return ResultUtils.success(true);
     }
 
@@ -202,11 +210,36 @@ public class UserController {
         }
         User user = new User();
         BeanUtils.copyProperties(userUpdateRequest, user);
-        boolean exists = userService.getById(userUpdateRequest.getId()) != null;
-        ThrowUtils.throwIf(!exists, ErrorCode.NOT_FOUND_ERROR, "用户不存在");
+        User oldUser = userService.getById(userUpdateRequest.getId());
+        ThrowUtils.throwIf(oldUser == null, ErrorCode.NOT_FOUND_ERROR, "用户不存在");
         boolean result = userService.updateById(user);
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
+        // 角色变了必须踢下线：会话里存的是登录那一刻的 User 快照，
+        // StpInterfaceImpl 判断管理员身份时读的就是这份快照，不踢会出现「已降级仍按管理员放行」。
+        // 仅改昵称之类的普通字段不踢，避免把人无故踢出登录。
+        if (user.getUserRole() != null && !Objects.equals(oldUser.getUserRole(), user.getUserRole())) {
+            logoutQuietly(user.getId());
+        }
         return ResultUtils.success(true);
+    }
+
+    /**
+     * 踢掉指定用户的全部登录态（所有设备）
+     * <p>
+     * 这里吞掉异常是有意的：调用方在此之前已经把数据改完了，不该因为 Redis 抖动
+     * 就让接口返回失败；最坏情况只是登录态多存活到 token 超时。
+     *
+     * @param userId 用户 id
+     */
+    private void logoutQuietly(Long userId) {
+        if (userId == null) {
+            return;
+        }
+        try {
+            StpKit.SPACE.logout(userId);
+        } catch (Exception e) {
+            log.warn("清理用户 {} 的登录态失败，将在 token 超时后自然失效：{}", userId, e.getMessage());
+        }
     }
 
     /**

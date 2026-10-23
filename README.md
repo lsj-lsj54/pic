@@ -213,9 +213,11 @@ processFile(输入, 文件) → 落地临时文件（本地转存 / 远程下载
 
 ### 6. 权限模型：Sa-Token 统一登录态与空间角色
 
-- **登录态**：`StpUtil.login(userId)` 签发 token，写入 Cookie（`satoken`），前端沿用 `credentials: 'include'` 无需改动；会话存 Redis（`sa-token-redis-jackson`），重启/多实例不丢登录态；
-- **动态权限**：实现 `StpInterface`，按登录账号实时计算——全局角色（`admin` / `user`）与空间维度权限码（`space:creator:{id}`、`space:{viewer|editor|admin}:{id}`），成员被移除后下次请求即失效，无需手动清缓存；
-- **校验入口**：`SpacePermissionUtils`（工具类，内部走 `StpUtil.hasPermission`）为主力路径；`@SaCheckSpaceRole` + `SpaceRoleAspect` 提供声明式注解校验；全局 admin 仍由 `@AuthCheck` 切面校验；
+- **登录态**：`StpKit.SPACE.login(userId)` 签发 token 写入 Cookie（`satoken`，**已开启 HttpOnly**——JS 读不到，靠浏览器自动携带，XSS 抄不走），前端沿用 `credentials: 'include'` 无需改动；会话存 Redis（`sa-token-redis-jackson`），重启/多实例不丢登录态；
+- **两套 StpLogic**：默认的 `StpUtil` 与 `StpKit.SPACE`（`new StpLogic("space")`）是两个独立账号体系，项目只用后者；注解靠 `type = "space"` 指定走这一套，`StpInterface` 里也按 `loginType` 分流；
+- **动态权限**：实现 `StpInterface`，从请求体反解 `spaceId / pictureId / spaceUserId`（依赖 `HttpRequestWrapperFilter` 让 body 可重复读），查 `space_user` 得到角色，再按 `all/spaceUserAuthConfig.json` 里 `roles[].permissions` 翻译成权限码（`picture:view/upload/edit/delete`、`spaceUser:manage`）；
+- **校验入口**：`@SaSpaceCheckPermission` 为主（对官方 `@SaCheckPermission` 的 `@AliasFor` 包装，**必须重写注解解析策略**否则 `value` 丢失、校验退化为放行），service 层再用 `PicturePermissionUtils` / `SpacePermissionUtils.checkSpaceAuth` / `canManageMember` 兜一次；全局 admin 仍由 `@AuthCheck` 切面校验；
+- **会话清理**：删除用户、以及管理员变更用户角色时调用 `StpKit.SPACE.logout(userId)` 踢掉该用户所有端口，避免 token 在 Redis 里空转到 30 天超时；只改昵称之类普通字段不踢，避免误伤；
 - **未登录 / 无权限**：`GlobalExceptionHandler` 统一映射 `NotLoginException → 40100`、`NotPermissionException/NotRoleException → 40101`，与原有错误码语义一致，前端无感。
 
 ### 7. 批量抓取
@@ -284,6 +286,7 @@ mysql -uroot -p < deploy/mysql/init.sql
 | 数据库账号密码 | `application-local.yml` 或环境变量 | `application.yml` 里是 `${MYSQL_USERNAME:root}` / `${MYSQL_PASSWORD:}` 占位符，**仓库中不含任何密码** |
 | 腾讯云 COS 五项参数 | `application-local.yml` 或环境变量 | `cos.client.host / secretId / secretKey / region / bucket` |
 | Redis 连接 | `application-local.yml` | **必需**：Sa-Token 会话存 Redis，未启动时登录会报错 |
+| Cookie 的 Secure 标记 | 环境变量 `SA_TOKEN_COOKIE_SECURE` | 默认 `false`（本地 HTTP 必须如此，否则浏览器不回传 Cookie）；生产走 HTTPS 时设成 `true`。`HttpOnly` 已固定开启 |
 
 `src/main/resources/application-local.yml` **已被 `.gitignore` 排除**，本地按下面的结构自建即可（`spring.profiles.active=local` 会自动加载）：
 

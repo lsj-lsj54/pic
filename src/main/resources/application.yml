@@ -58,6 +58,14 @@ sa-token:
   is-read-cookie: true
   # 是否在登录成功后把 token 写入 Cookie 返回给前端
   is-write-cookie: true
+  # Cookie 安全属性
+  # 注意：Sa-Token 的 SaCookieConfig 默认 httpOnly=false，意味着 document.cookie 能直接读到
+  # satoken，一次 XSS 就能把这份 30 天有效的登录态抄走。前端只用 credentials: 'include'
+  # 携带 Cookie、不靠 JS 读取，所以开启它没有任何副作用。
+  cookie:
+    http-only: true
+    # 本地是 HTTP，开启 secure 会导致浏览器不回传 Cookie；生产 HTTPS 用环境变量覆盖为 true
+    secure: ${SA_TOKEN_COOKIE_SECURE:false}
   # 关闭 Sa-Token 默认的同源校验（跨域场景由 CorsConfig 统一处理）
   is-check-same-token: false
 
