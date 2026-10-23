@@ -1,32 +1,29 @@
 package com.lsj.demo.common;
 
-import cn.dev33.satoken.stp.StpUtil;
 import com.lsj.demo.exception.BusinessException;
 import com.lsj.demo.exception.ErrorCode;
 import com.lsj.demo.exception.ThrowUtils;
 import com.lsj.demo.model.entity.Space;
+import com.lsj.demo.model.entity.SpaceUser;
 import com.lsj.demo.model.entity.User;
 import com.lsj.demo.model.enums.SpaceRoleEnum;
 import com.lsj.demo.model.enums.SpaceTypeEnum;
-import com.lsj.demo.model.enums.UserRoleEnum;
 import com.lsj.demo.service.SpaceUserService;
 import com.lsj.demo.service.UserService;
 
+import java.util.Arrays;
 import java.util.Objects;
 
 /**
- * 空间权限校验工具类（基于 Sa-Token 动态权限码实现）。
+ * 空间权限校验工具类（数据级校验：这个空间的归属是谁、这个用户在里面是什么角色）。
  * <p>
- * 空间成员权限统一编码为权限码，由 {@code SaTokenStpInterfaceImpl} 在登录态下动态计算：
+ * 与 Controller 上的注解鉴权分工：
  * <ul>
- *     <li>{@code space:creator:{spaceId}} —— 空间创建者</li>
- *     <li>{@code space:viewer:{spaceId}} —— 团队空间浏览者</li>
- *     <li>{@code space:editor:{spaceId}} —— 团队空间编辑者</li>
- *     <li>{@code space:admin:{spaceId}} —— 团队空间管理员</li>
+ *     <li>注解 {@code @SaSpaceCheckPermission} 在进入方法前，按请求里的 spaceId / pictureId
+ *     算出「当前用户在这个空间里的角色权限码」，拦住越权调用；</li>
+ *     <li>本工具类在业务层按数据库里的真实归属做二次校验，用于 service 内部复用、
+ *     无法挂注解的入口（分页查询、分析、上传落库后等），也防止注解上下文解析不到时的漏判。</li>
  * </ul>
- * 本工具类保留原有静态方法签名，内部改为 {@code StpUtil.hasPermission} 校验，
- * 所有调用点（图片上传/删除/编辑、空间编辑/删除/查看等）无需改动。
- * <p>
  * 规则：
  * <ul>
  *     <li>私有空间：只有空间创建者或系统管理员能看、能改；</li>
@@ -55,7 +52,7 @@ public class SpacePermissionUtils {
     }
 
     /**
-     * 校验用户是否有操作该空间的权限（识别团队空间，基于 Sa-Token 权限码）
+     * 校验用户是否有操作该空间的权限（识别团队空间）
      * <p>
      * 私有空间规则不变；团队空间中，角色为 admin / editor 的成员也可以操作。
      */
@@ -67,9 +64,9 @@ public class SpacePermissionUtils {
         if (isCreator(space, loginUser) || userService.isAdmin(loginUser)) {
             return;
         }
-        // 团队空间：admin / editor 成员可操作（通过 Sa-Token 权限码校验）
-        if (Objects.equals(SpaceTypeEnum.TEAM.getValue(), space.getSpaceType())
-                && hasAnyPermission(space.getId(),
+        // 团队空间：admin / editor 成员可操作
+        if (isTeamSpace(space)
+                && hasAnyRole(spaceUserService, space.getId(), loginUser.getId(),
                 SpaceRoleEnum.ADMIN.getValue(), SpaceRoleEnum.EDITOR.getValue())) {
             return;
         }
@@ -88,7 +85,7 @@ public class SpacePermissionUtils {
     }
 
     /**
-     * 校验用户是否可以查看该空间（识别团队空间，基于 Sa-Token 权限码）
+     * 校验用户是否可以查看该空间（识别团队空间）
      * <p>
      * 团队空间的所有成员（含 viewer）都可以查看空间及其中的图片。
      */
@@ -100,8 +97,8 @@ public class SpacePermissionUtils {
             return;
         }
         // 团队空间：任意角色的成员均可查看
-        if (Objects.equals(SpaceTypeEnum.TEAM.getValue(), space.getSpaceType())
-                && hasAnyPermission(space.getId(),
+        if (isTeamSpace(space)
+                && hasAnyRole(spaceUserService, space.getId(), loginUser.getId(),
                 SpaceRoleEnum.VIEWER.getValue(), SpaceRoleEnum.EDITOR.getValue(), SpaceRoleEnum.ADMIN.getValue())) {
             return;
         }
@@ -109,7 +106,7 @@ public class SpacePermissionUtils {
     }
 
     /**
-     * 当前登录用户是否为该空间创建者（基于 Sa-Token 权限码）
+     * 当前登录用户是否为该空间创建者
      */
     private static boolean isCreator(Space space, User loginUser) {
         // 直接比对空间归属用户 id，最快也最可靠
@@ -117,27 +114,25 @@ public class SpacePermissionUtils {
     }
 
     /**
-     * 当前登录用户是否命中任一空间角色权限码
-     *
-     * @param spaceId 空间 id
-     * @param roles   允许的空间角色 value（viewer / editor / admin）
+     * 是否为团队空间
      */
-    private static boolean hasAnyPermission(Long spaceId, String... roles) {
-        for (String role : roles) {
-            if (StpUtil.hasPermission(buildPermission(role, spaceId))) {
-                return true;
-            }
-        }
-        return false;
+    private static boolean isTeamSpace(Space space) {
+        return Objects.equals(SpaceTypeEnum.TEAM.getValue(), space.getSpaceType());
     }
 
     /**
-     * 拼接空间权限码：space:{role}:{spaceId}
+     * 用户在该空间中的角色是否命中给定角色之一
      * <p>
-     * 对外公开，供 SpaceUserServiceImpl 等其它模块复用统一的权限码格式，
-     * 避免各处手写字符串导致权限码不一致。
+     * 直接查 space_user 表，不走 Sa-Token 权限码：这里需要的是「数据库里的真实角色」，
+     * 而权限码依赖请求上下文（体里的 spaceId），在 service 内部不一定能取到。
+     *
+     * @param spaceUserService 空间成员服务
+     * @param spaceId          空间 id
+     * @param userId           用户 id
+     * @param roles            允许的角色 value（viewer / editor / admin）
      */
-    public static String buildPermission(String role, Long spaceId) {
-        return "space:" + role + ":" + spaceId;
+    private static boolean hasAnyRole(SpaceUserService spaceUserService, Long spaceId, Long userId, String... roles) {
+        SpaceUser spaceUser = spaceUserService.getSpaceUser(spaceId, userId);
+        return spaceUser != null && Arrays.asList(roles).contains(spaceUser.getSpaceRole());
     }
 }

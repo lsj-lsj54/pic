@@ -3,6 +3,7 @@ package com.lsj.demo.controller.aop;
 import com.lsj.demo.annotation.AuthCheck;
 import com.lsj.demo.exception.BusinessException;
 import com.lsj.demo.exception.ErrorCode;
+import com.lsj.demo.exception.ThrowUtils;
 import com.lsj.demo.model.entity.User;
 import com.lsj.demo.model.enums.UserRoleEnum;
 import com.lsj.demo.service.UserService;
@@ -32,7 +33,9 @@ public class AuthInterceptor {
      */
     @Around("@annotation(authCheck)")
     public Object doInterceptor(ProceedingJoinPoint joinPoint, AuthCheck authCheck) throws Throwable {
+        //获取该方法所需的权限
         String mustRole = authCheck.mustRole();
+        //从当前线程里把这次 HTTP 请求的 HttpServletRequest 对象取出来。样板代码
         RequestAttributes requestAttributes = RequestContextHolder.currentRequestAttributes();
         HttpServletRequest request = ((ServletRequestAttributes) requestAttributes).getRequest();
         // 当前登录用户
@@ -46,9 +49,7 @@ public class AuthInterceptor {
         // 获取当前用户具有的权限
         UserRoleEnum userRoleEnum = UserRoleEnum.getEnumByValue(loginUser.getUserRole());
         // 没有权限，拒绝
-        if (userRoleEnum == null) {
-            throw new BusinessException(ErrorCode.NO_AUTH_ERROR);
-        }
+        ThrowUtils.throwIf(userRoleEnum == null,ErrorCode.NO_AUTH_ERROR,"用户没有权限");
         // 要求必须有管理员权限，但用户没有管理员权限，拒绝
         if (UserRoleEnum.ADMIN.equals(mustRoleEnum) && !UserRoleEnum.ADMIN.equals(userRoleEnum)) {
             throw new BusinessException(ErrorCode.NO_AUTH_ERROR);

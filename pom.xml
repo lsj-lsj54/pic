@@ -12,6 +12,8 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
         <spring-boot.version>2.6.13</spring-boot.version>
+        <!-- Sa-Token 各模块版本必须一致，混用会导致注解策略类缺失（1.39 起拆出 SaAnnotationStrategy） -->
+        <sa-token.version>1.39.0</sa-token.version>
     </properties>
     <dependencies>
         <dependency>
@@ -121,13 +123,13 @@
         <dependency>
             <groupId>cn.dev33</groupId>
             <artifactId>sa-token-spring-boot-starter</artifactId>
-            <version>1.38.0</version>
+            <version>${sa-token.version}</version>
         </dependency>
         <!-- Sa-Token 会话存 Redis，多实例/重启后登录态不丢 -->
         <dependency>
             <groupId>cn.dev33</groupId>
             <artifactId>sa-token-redis-jackson</artifactId>
-            <version>1.38.0</version>
+            <version>${sa-token.version}</version>
         </dependency>
         <!-- Sa-Token 用到的连接池，与上面的 redis-jackson 配套 -->
         <dependency>

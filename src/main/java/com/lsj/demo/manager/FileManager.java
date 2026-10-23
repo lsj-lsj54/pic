@@ -188,7 +188,7 @@ public class FileManager {
         }
 
         // 2. 校验 URL 协议
-        ThrowUtils.throwIf(!(fileUrl.startsWith("http://") || fileUrl.startsWith("https://")),
+        ThrowUtils.throwIf(!(fileUrl.startsWith("https://") || fileUrl.startsWith("https://")),
                 ErrorCode.PARAMS_ERROR, "仅支持 HTTP 或 HTTPS 协议的文件地址");
 
         // 3. 发送 HEAD 请求以验证文件是否存在

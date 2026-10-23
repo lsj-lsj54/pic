@@ -13,13 +13,13 @@ public interface UserConstant {
      * 管理员角色
      */
     String ADMIN_ROLE = "admin";
-    
+
     // endregion
 
     /**
      * 默认密码（管理员创建用户时使用）
      */
-    String DEFAULT_PASSWORD = "12345678";
+    String DEFAULT_PASSWORD = "123456";
 
     /**
      * 密码最小长度
@@ -38,4 +38,7 @@ public interface UserConstant {
      * 注册时未填写昵称的默认前缀，最终为「用户 + 6 位随机数」
      */
     String DEFAULT_USER_NAME_PREFIX = "用户";
+
+    String USER_LOGIN_STATE="user_login_state";
+
 }

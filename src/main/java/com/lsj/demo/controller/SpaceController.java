@@ -9,6 +9,8 @@ import com.lsj.demo.common.SpacePermissionUtils;
 import com.lsj.demo.exception.BusinessException;
 import com.lsj.demo.exception.ErrorCode;
 import com.lsj.demo.exception.ThrowUtils;
+import com.lsj.demo.manager.auth.annotation.SaSpaceCheckPermission;
+import com.lsj.demo.model.constant.SpaceUserPermissionConstant;
 import com.lsj.demo.model.constant.UserConstant;
 import com.lsj.demo.model.dto.space.SpaceAddRequest;
 import com.lsj.demo.model.dto.space.SpaceDeleteRequest;
@@ -131,12 +133,15 @@ public class SpaceController {
 
     /**
      * 编辑空间名称（仅空间创建者或管理员可用）
+     * <p>
+     * 权限：{@code picture:edit}，与「编辑空间内容」同权——团队空间的 editor / admin 成员可改名。
      *
      * @param spaceEditRequest 空间编辑请求
      * @param request          request 请求
      * @return 是否编辑成功
      */
     @PostMapping("/edit")
+    @SaSpaceCheckPermission(SpaceUserPermissionConstant.PICTURE_EDIT)
     public BaseResponse<Boolean> editSpace(@RequestBody SpaceEditRequest spaceEditRequest,
                                            HttpServletRequest request) {
         if (spaceEditRequest == null || spaceEditRequest.getId() == null || spaceEditRequest.getId() <= 0) {
@@ -176,13 +181,16 @@ public class SpaceController {
     }
 
     /**
-     * 根据 id 获取空间封装类（仅空间创建者或管理员可用）
+     * 根据 id 获取空间封装类（仅空间创建者、成员或管理员可用）
+     * <p>
+     * 权限：{@code picture:view}，团队空间任意角色的成员都能查看空间信息。
      *
      * @param id      空间 id
      * @param request request 请求
      * @return 空间封装类
      */
     @GetMapping("/get/vo")
+    @SaSpaceCheckPermission(SpaceUserPermissionConstant.PICTURE_VIEW)
     public BaseResponse<SpaceVO> getSpaceVOById(long id, HttpServletRequest request) {
         ThrowUtils.throwIf(id <= 0, ErrorCode.PARAMS_ERROR);
         Space space = spaceService.getById(id);

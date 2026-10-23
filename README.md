@@ -3,7 +3,7 @@
 ![Java](https://img.shields.io/badge/Java-8%20%7C%20JDK%2017-orange)
 ![Spring Boot](https://img.shields.io/badge/Spring%20Boot-2.6.13-6db33f)
 ![MyBatis-Plus](https://img.shields.io/badge/MyBatis--Plus-3.5.9-2f6fed)
-![Sa-Token](https://img.shields.io/badge/Sa--Token-1.38.0-2f6fed)
+![Sa-Token](https://img.shields.io/badge/Sa--Token-1.39.0-2f6fed)
 ![MySQL](https://img.shields.io/badge/MySQL-8.0-4479a1)
 ![Redis](https://img.shields.io/badge/Redis-7-dc382d)
 ![COS](https://img.shields.io/badge/对象存储-腾讯云%20COS-0052d9)
@@ -82,7 +82,7 @@
 | 分类 | 选型 |
 | --- | --- |
 | 语言 / 构建 | Java 8 语言级别（构建与运行使用 JDK 17）、Maven 3.8 |
-| 后端框架 | Spring Boot 2.6.13、Spring AOP、Sa-Token 1.38.0（登录态 + 角色/权限校验，会话存 Redis） |
+| 后端框架 | Spring Boot 2.6.13、Spring AOP、Sa-Token 1.39.0（登录态 + 角色/权限校验，会话存 Redis） |
 | 持久层 | MyBatis-Plus 3.5.9（含 `mybatis-plus-jsqlparser` 分页插件）、MySQL 8、逻辑删除、雪花 ID |
 | 缓存 | Caffeine 3.1.8（本地一级）+ Redis / Spring Data Redis（分布式二级 + Sa-Token 会话） |
 | 对象存储 | 腾讯云 COS Java SDK 5.6.227 + 数据万象（上传即产出 webp 压缩图） |

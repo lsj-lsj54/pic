@@ -7,6 +7,8 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.lsj.demo.exception.BusinessException;
 import com.lsj.demo.exception.ErrorCode;
+import com.lsj.demo.exception.ThrowUtils;
+import com.lsj.demo.manager.auth.StpKit;
 import com.lsj.demo.model.constant.UserConstant;
 import com.lsj.demo.model.dto.user.UserQueryRequest;
 import com.lsj.demo.model.entity.User;
@@ -30,6 +32,8 @@ import java.util.List;
 import java.util.Objects;
 import java.util.stream.Collectors;
 
+import static com.lsj.demo.model.constant.UserConstant.USER_LOGIN_STATE;
+
 /**
  * @author lsj
  * @description 针对表【user(用户)】的数据库操作Service实现
@@ -52,28 +56,20 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
     @Override
     public long userRegister(String userAccount, String userPassword, String checkPassword, String userName) {
         // 1. 校验
-        if (StrUtil.hasBlank(userAccount, userPassword, checkPassword)) {
-            throw new BusinessException(ErrorCode.PARAMS_ERROR, "参数为空");
-        }
-        if (userAccount.length() < 2) {
-            throw new BusinessException(ErrorCode.PARAMS_ERROR, "用户账号过短");
-        }
+        ThrowUtils.throwIf(StrUtil.hasBlank(userAccount, userPassword, checkPassword), ErrorCode.PARAMS_ERROR, "参数为空");
+        ThrowUtils.throwIf(userAccount.length() < 2, ErrorCode.PARAMS_ERROR, "用户账号过短");
         // 与登录共用同一个最小长度常量，避免两处阈值不一致导致「能注册不能登录」
         if (userPassword.length() < UserConstant.MIN_PASSWORD_LENGTH
                 || checkPassword.length() < UserConstant.MIN_PASSWORD_LENGTH) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR,
                     "用户密码过短，至少 " + UserConstant.MIN_PASSWORD_LENGTH + " 位");
         }
-        if (!userPassword.equals(checkPassword)) {
-            throw new BusinessException(ErrorCode.PARAMS_ERROR, "两次输入的密码不一致");
-        }
+        ThrowUtils.throwIf(!userPassword.equals(checkPassword), ErrorCode.PARAMS_ERROR, "两次输入的密码不一致");
         // 2. 检查是否重复
         QueryWrapper<User> queryWrapper = new QueryWrapper<>();
         queryWrapper.eq("userAccount", userAccount);
         long count = this.baseMapper.selectCount(queryWrapper);
-        if (count > 0) {
-            throw new BusinessException(ErrorCode.PARAMS_ERROR, "账号重复");
-        }
+        ThrowUtils.throwIf(count > 0, ErrorCode.PARAMS_ERROR, "账号重复");
         // 3. 加密
         String encryptPassword = getEncryptPassword(userPassword);
         // 4. 插入数据
@@ -84,9 +80,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
         user.setUserName(resolveUserName(userName));
         user.setUserRole(UserRoleEnum.USER.getValue());
         boolean saveResult = this.save(user);
-        if (!saveResult) {
-            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "注册失败，数据库错误");
-        }
+        ThrowUtils.throwIf(!saveResult, ErrorCode.SYSTEM_ERROR, "注册失败，数据库错误");
         return user.getId();
     }
 
@@ -155,7 +149,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
     @Override
     public String getEncryptPassword(String userPassword) {
         // 盐值，混淆密码
-        final String SALT = "yupi";
+        final String SALT = "lsj";
         // 显式指定 UTF-8：getBytes() 用平台默认字符集，本地（GBK）与服务器（UTF-8）
         // 加密结果会不一致，表现为「本地注册的账号在服务器上登录不了」，
         // 密码里含中文等非 ASCII 字符时必现。
@@ -174,15 +168,9 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
     @Override
     public LoginUserVO userLogin(String userAccount, String userPassword, HttpServletRequest request) {
         // 1. 校验
-        if (StrUtil.hasBlank(userAccount, userPassword)) {
-            throw new BusinessException(ErrorCode.PARAMS_ERROR, "参数为空");
-        }
-        if (userAccount.length() < 2) {
-            throw new BusinessException(ErrorCode.PARAMS_ERROR, "账号错误");
-        }
-        // 这里不再单独拦截「密码过短」：
-        // 之前写的是 < 6，而注册只要求 < 5，导致 5 位密码注册成功却永远登不进去。
-        // 密码正确与否统一交给下面的数据库比对来判断。
+        ThrowUtils.throwIf(StrUtil.hasBlank(userAccount, userPassword), ErrorCode.PARAMS_ERROR, "参数为空");
+        ThrowUtils.throwIf(userAccount.length() < 2, ErrorCode.PARAMS_ERROR, "账号格式错误");
+
         // 2. 加密
         String encryptPassword = getEncryptPassword(userPassword);
         // 查询用户是否存在
@@ -195,27 +183,18 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
             log.info("user login failed, userAccount cannot match userPassword");
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "用户不存在或密码错误");
         }
-        // 3. 记录用户的登录态（改用 Sa-Token：以用户 id 作为登录凭证，会话存 Redis）
+        // 3. 记录登录态：全程只用 space 这一套 Sa-Token 账号体系
+        //    - login 写 token（Cookie + Redis），后续 getLoginUser 都从这套会话里取
+        //    - 同时把 User 放进会话，供 StpInterfaceImpl 计算空间权限时直接取用，避免每次再查库
         try {
-            StpUtil.login(user.getId());
+            StpKit.SPACE.login(user.getId());
+            StpKit.SPACE.getSession().set(USER_LOGIN_STATE, user);
         } catch (org.springframework.dao.DataAccessException e) {
             // Redis 不可用（连接失败/超时）时 Sa-Token 无法写入会话，
             // 这里不把异常吞成「系统错误」，而是明确告知是服务不可用，方便排查与重试。
             log.error("登录失败：Redis 不可用，无法写入登录态", e);
             throw new BusinessException(ErrorCode.SERVICE_UNAVAILABLE, "登录服务暂不可用，请稍后重试");
         }
-        return this.getLoginUserVO(user);
-    }
-
-    /**
-     * 获取脱敏的已登录用户信息
-     *
-     * @param user 脱敏前的用户信息
-     * @return 脱敏的已登录用户信息
-     */
-    @Override
-    public LoginUserVO getLoginUserVO(User user) {
-        // 实体转封装类统一走 VO 自己的工厂方法，避免各处重复写 BeanUtils
         return LoginUserVO.entityToVo(user);
     }
 
@@ -227,13 +206,11 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
      */
     @Override
     public User getLoginUser(HttpServletRequest request) {
-        // 登录态由 Sa-Token 管理：StpUtil.getLoginIdAsLong() 未登录会抛 NotLoginException，
+        // 登录态由 space 这套 Sa-Token 会话管理：未登录会抛 NotLoginException，
         // 由全局异常处理器统一转成 NOT_LOGIN_ERROR，前端无需感知实现差异。
-        long userId = StpUtil.getLoginIdAsLong();
+        long userId = StpKit.SPACE.getLoginIdAsLong();
         User currentUser = this.getById(userId);
-        if (currentUser == null) {
-            throw new BusinessException(ErrorCode.NOT_LOGIN_ERROR);
-        }
+        ThrowUtils.throwIf(currentUser == null, ErrorCode.NOT_LOGIN_ERROR, "未登录");
         return currentUser;
     }
 
@@ -247,7 +224,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
     public User getLoginUserOrNull(HttpServletRequest request) {
         // 未登录时返回 null 而不抛异常，供「登录可见全部、未登录只看公开内容」的接口使用
         try {
-            long userId = StpUtil.getLoginIdAsLong();
+            long userId = StpKit.SPACE.getLoginIdAsLong();
             return this.getById(userId);
         } catch (Exception e) {
             // 未登录或 token 失效都返回 null
@@ -263,7 +240,9 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
      */
     @Override
     public boolean userLogout(HttpServletRequest request) {
-        // 未登录时 StpUtil.logout 不会抛异常，直接返回 true 即可
+        // 未登录时 logout 不会抛异常，直接返回 true 即可；
+        // 两套会话都清一次，避免历史 token 残留（旧版本曾用默认体系登录）
+        StpKit.SPACE.logout();
         StpUtil.logout();
         return true;
     }
@@ -335,6 +314,13 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
         return user != null && UserRoleEnum.ADMIN.getValue().equals(user.getUserRole());
     }
 
+    /**
+     * 按照关键词搜索用户
+     *
+     * @param keyword 搜索关键字（匹配昵称或账号）
+     * @param limit   返回条数上限
+     * @return
+     */
     @Override
     public List<UserVO> searchUserVO(String keyword, int limit) {
         if (StrUtil.isBlank(keyword)) {

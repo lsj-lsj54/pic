@@ -84,7 +84,7 @@ public class UserController {
     @GetMapping("/get/login")
     public BaseResponse<LoginUserVO> getLoginUser(HttpServletRequest request) {
         User user = userService.getLoginUser(request);
-        return ResultUtils.success(userService.getLoginUserVO(user));
+        return ResultUtils.success(LoginUserVO.entityToVo(user));
     }
 
     /**
@@ -117,7 +117,7 @@ public class UserController {
         User loginUser = userService.getLoginUser(request);
         userService.updateUserName(loginUser.getId(), userUpdateMyRequest.getUserName());
         // 重新查一次再脱敏返回，避免把 Session 里的旧昵称回给前端
-        return ResultUtils.success(userService.getLoginUserVO(userService.getById(loginUser.getId())));
+        return ResultUtils.success(LoginUserVO.entityToVo(userService.getById(loginUser.getId())));
     }
 
     /**
@@ -202,6 +202,8 @@ public class UserController {
         }
         User user = new User();
         BeanUtils.copyProperties(userUpdateRequest, user);
+        boolean exists = userService.getById(userUpdateRequest.getId()) != null;
+        ThrowUtils.throwIf(!exists, ErrorCode.NOT_FOUND_ERROR, "用户不存在");
         boolean result = userService.updateById(user);
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
         return ResultUtils.success(true);
@@ -213,6 +215,7 @@ public class UserController {
      * @param userQueryRequest 查询请求参数
      * @return 用户封装类分页数据
      */
+    //注意这里如果直接把recode里的Long类型的id直接返回，会丢失精度，原因是js的精确度不够
     @PostMapping("/list/page/vo")
     @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
     public BaseResponse<Page<UserVO>> listUserVOByPage(@RequestBody UserQueryRequest userQueryRequest) {
@@ -239,7 +242,7 @@ public class UserController {
     @GetMapping("/search")
     public BaseResponse<List<UserVO>> searchUser(String keyword, HttpServletRequest request) {
         // 仅要求登录，非管理员也能用（邀请成员需要）
-        userService.getLoginUser(request);
+        //userService.getLoginUser(request);
         return ResultUtils.success(userService.searchUserVO(keyword, 20));
     }
 

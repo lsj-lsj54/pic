@@ -1,6 +1,5 @@
 package com.lsj.demo.service.impl;
 
-import cn.dev33.satoken.stp.StpUtil;
 import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.util.ObjUtil;
 import cn.hutool.core.util.StrUtil;
@@ -9,7 +8,6 @@ import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.lsj.demo.exception.BusinessException;
 import com.lsj.demo.exception.ErrorCode;
 import com.lsj.demo.exception.ThrowUtils;
-import com.lsj.demo.common.SpacePermissionUtils;
 import com.lsj.demo.mapper.SpaceMapper;
 import com.lsj.demo.mapper.SpaceUserMapper;
 import com.lsj.demo.model.dto.spaceuser.SpaceUserAddRequest;
@@ -255,9 +253,10 @@ public class SpaceUserServiceImpl extends ServiceImpl<SpaceUserMapper, SpaceUser
     /**
      * 是否为空间成员管理者：空间创建者、团队管理员或系统管理员。
      * <p>
-     * 权限判定基于 Sa-Token 动态权限码（见 SaTokenStpInterfaceImpl）：
-     * 创建者拥有 space:creator:{spaceId}，团队管理员拥有 space:admin:{spaceId}，
-     * 系统管理员通过全局角色放行。
+     * 这里直接查 space_user 表判断角色，而不是用 {@code StpUtil.hasPermission} 拼权限码：
+     * 权限码由 {@code StpInterfaceImpl} 依据请求上下文动态计算，在 service 内部调用时
+     * 拿不到可靠的 spaceId 来源，容易算出空权限把正常操作误判成越权。
+     * 入口处的角色权限拦截交给 Controller 上的 {@code @SaSpaceCheckPermission}。
      */
     private boolean canManageMember(Space space, User loginUser) {
         if (Objects.equals(space.getUserId(), loginUser.getId())) {
@@ -266,7 +265,8 @@ public class SpaceUserServiceImpl extends ServiceImpl<SpaceUserMapper, SpaceUser
         if (userService.isAdmin(loginUser)) {
             return true;
         }
-        // 团队管理员可管理成员：校验 space:admin:{spaceId} 权限码
-        return StpUtil.hasPermission(SpacePermissionUtils.buildPermission(SpaceRoleEnum.ADMIN.getValue(), space.getId()));
+        // 团队管理员可管理成员
+        SpaceUser spaceUser = getSpaceUser(space.getId(), loginUser.getId());
+        return spaceUser != null && SpaceRoleEnum.ADMIN.getValue().equals(spaceUser.getSpaceRole());
     }
 }

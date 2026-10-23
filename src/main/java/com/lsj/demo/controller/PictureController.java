@@ -11,6 +11,8 @@ import com.lsj.demo.common.ResultUtils;
 import com.lsj.demo.exception.BusinessException;
 import com.lsj.demo.exception.ErrorCode;
 import com.lsj.demo.exception.ThrowUtils;
+import com.lsj.demo.manager.auth.annotation.SaSpaceCheckPermission;
+import com.lsj.demo.model.constant.SpaceUserPermissionConstant;
 import com.lsj.demo.model.constant.UserConstant;
 import com.lsj.demo.model.dto.picture.*;
 import com.lsj.demo.model.entity.Picture;
@@ -38,6 +40,13 @@ import java.util.Date;
  * 图片模块接口
  * <p>
  * 原先图片接口分散在 FileController 和 PictureServiceImpl 中，这里统一归位到图片模块自己的 Controller。
+ * <p>
+ * 空间权限注解（{@link SaSpaceCheckPermission}）的挂载原则：
+ * <ul>
+ *     <li>写操作（上传 / 删除 / 编辑）都挂注解：进入方法前就按 spaceId 或 pictureId 算角色权限码；</li>
+ *     <li>列表与详情<strong>故意不挂</strong>：公共图库允许匿名浏览，注解会连带强制登录；
+ *     空间内的可见性由 service 层按 spaceId 单独校验。</li>
+ * </ul>
  *
  * @author lsj
  */
@@ -65,6 +74,9 @@ public class PictureController {
 
     /**
      * 上传图片（本地文件，可重新上传）
+     * <p>
+     * 权限：{@code picture:upload}。请求带 spaceId 时校验该空间的上传权限；
+     * 不带 spaceId（公共图库 / 个人图库）时没有空间维度可校验，任意登录用户可上传。
      *
      * @param multipartFile        上传的图片文件
      * @param pictureUploadRequest 图片上传请求，id 不为空时表示重新上传
@@ -72,6 +84,7 @@ public class PictureController {
      * @return 图片封装类
      */
     @PostMapping("/upload")
+    @SaSpaceCheckPermission(SpaceUserPermissionConstant.PICTURE_UPLOAD)
     public BaseResponse<PictureVO> uploadPicture(@RequestPart(value = "file", required = false) MultipartFile multipartFile,
                                                  PictureUploadRequest pictureUploadRequest,
                                                  HttpServletRequest request) {
@@ -92,6 +105,7 @@ public class PictureController {
      * @return 图片封装类
      */
     @PostMapping("/upload/url")
+    @SaSpaceCheckPermission(SpaceUserPermissionConstant.PICTURE_UPLOAD)
     public BaseResponse<PictureVO> uploadPictureByUrl(@RequestBody PictureUploadRequest pictureUploadRequest,
                                                       HttpServletRequest request) {
         ThrowUtils.throwIf(pictureUploadRequest == null
@@ -108,12 +122,16 @@ public class PictureController {
 
     /**
      * 删除图片
+     * <p>
+     * 权限：{@code picture:delete}。图片在空间里时按空间角色校验（viewer 无此权限）；
+     * 公共图库的图片要求是上传者本人或管理员。
      *
      * @param deleteRequest 删除请求，包含图片 id
      * @param request       request 请求
      * @return 是否删除成功
      */
     @PostMapping("/delete")
+    @SaSpaceCheckPermission(SpaceUserPermissionConstant.PICTURE_DELETE)
     public BaseResponse<Boolean> deletePicture(@RequestBody DeleteRequest deleteRequest, HttpServletRequest request) {
         if (deleteRequest == null || deleteRequest.getId() <= 0) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR);
@@ -251,12 +269,16 @@ public class PictureController {
 
     /**
      * 编辑图片（给用户使用）
+     * <p>
+     * 权限：{@code picture:edit}。空间内的图片按空间角色校验（viewer 无此权限），
+     * 公共图库的图片要求是上传者本人或管理员。
      *
      * @param pictureEditRequest 图片编辑请求
      * @param request            request 请求
      * @return 是否编辑成功
      */
     @PostMapping("/edit")
+    @SaSpaceCheckPermission(SpaceUserPermissionConstant.PICTURE_EDIT)
     public BaseResponse<Boolean> editPicture(@RequestBody PictureEditRequest pictureEditRequest,
                                              HttpServletRequest request) {
         if (pictureEditRequest == null || pictureEditRequest.getId() <= 0) {

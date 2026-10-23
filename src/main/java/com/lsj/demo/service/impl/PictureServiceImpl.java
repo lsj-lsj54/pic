@@ -187,12 +187,13 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
      */
     private PictureVO doUpload(Object inputSource, String uploadType,
                                PictureUploadRequest pictureUploadRequest, User loginUser) {
-        ThrowUtils.throwIf(loginUser == null, ErrorCode.NO_AUTH_ERROR);
+        ThrowUtils.throwIf(loginUser == null, ErrorCode.NOT_LOGIN_ERROR);
 
         // 判断是新增还是覆盖已有图片
         Long pictureId = pictureUploadRequest == null ? null : pictureUploadRequest.getId();
         Picture oldPicture = null;
         if (pictureId != null) {
+            //先保留旧图片信息
             oldPicture = this.getById(pictureId);
             ThrowUtils.throwIf(oldPicture == null, ErrorCode.NOT_FOUND_ERROR, "图片不存在");
             // 仅本人或管理员可覆盖；图片在空间里时还要满足空间的权限规则（团队空间按成员角色放行）
