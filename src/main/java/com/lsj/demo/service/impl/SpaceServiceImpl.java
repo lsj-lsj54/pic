@@ -14,6 +14,7 @@ import com.lsj.demo.exception.BusinessException;
 import com.lsj.demo.exception.ErrorCode;
 import com.lsj.demo.exception.ThrowUtils;
 import com.lsj.demo.mapper.SpaceMapper;
+import com.lsj.demo.manager.sharding.DynamicShardingManager;
 import com.lsj.demo.model.dto.space.SpaceAddRequest;
 import com.lsj.demo.model.dto.space.SpaceDeleteRequest;
 import com.lsj.demo.model.dto.space.SpaceQueryRequest;
@@ -73,6 +74,16 @@ public class SpaceServiceImpl extends ServiceImpl<SpaceMapper, Space>
     @Autowired
     @Lazy
     private PictureService pictureService;
+
+    /**
+     * 团队空间创建后要建对应的 picture_{spaceId} 分表。
+     * <p>
+     * DynamicShardingManager 反过来依赖 SpaceService 查团队空间列表，构成循环依赖，
+     * 所以同样用 @Lazy 注入代理对象。
+     */
+    @Autowired
+    @Lazy
+    private DynamicShardingManager dynamicShardingManager;
 
     /**
      * 按用户加锁：同一个账号并发创建空间时，防止插入两条同名空间
@@ -183,7 +194,14 @@ public class SpaceServiceImpl extends ServiceImpl<SpaceMapper, Space>
                     }
                     return space.getId();
                 });
-                return Optional.ofNullable(newSpaceId).orElse(-1L);
+                long spaceId = Optional.ofNullable(newSpaceId).orElse(-1L);
+                // 团队空间创建独立分表 picture_{spaceId}。
+                // 必须放在事务外面：MySQL 的 DDL 会隐式提交当前事务，
+                // 放进 transactionTemplate 里会让整个创建流程失去回滚能力。
+                if (spaceId > 0) {
+                    dynamicShardingManager.createSpacePictureTable(space);
+                }
+                return spaceId;
             } finally {
                 lockmap.remove(loginUser.getId());
             }

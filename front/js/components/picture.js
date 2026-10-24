@@ -164,7 +164,7 @@ function renderRing(stateClass) {
  *
  * @param {object}   options
  * @param {string}   [options.pictureId] 图片 id，传了表示覆盖上传
- * @param {string}   [options.spaceId]   空间 id，传了表示上传到该私有空间
+ * @param {string}   [options.spaceId]   空间 id，缺省传 0 表示上传到公共图库
  * @param {string}   [options.spaceName] 空间名称，仅用于弹窗里的提示文案
  * @param {Function} [options.onSuccess] 上传成功回调
  */
@@ -531,7 +531,7 @@ export async function openPictureDetail(id, { onChanged } = {}) {
           <div class="detail-row"><span>上传者</span><p>${escapeHtml(picture.user
     ? picture.user.userName || picture.user.userAccount : '-')}</p></div>
           <div class="detail-row"><span>所属空间</span><p>${picture.spaceId
-    ? `私有空间（<a href="#/space/detail?id=${encodeURIComponent(picture.spaceId)}">去空间查看</a>）`
+    ? `空间（<a href="#/space/detail?id=${encodeURIComponent(picture.spaceId)}">去空间查看</a>）`
     : '公共图库'}</p></div>
           <div class="detail-row"><span>上传时间</span><p>${formatTime(picture.createTime)}</p></div>
           <div class="detail-actions">

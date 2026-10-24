@@ -73,9 +73,9 @@ public class SpaceAnalyzeServiceImpl implements SpaceAnalyzeService {
         checkAnalyzeAuth(analyzeRequest, loginUser);
         Long spaceId = analyzeRequest.getSpaceId();
         SpaceUsageAnalyzeVO vo = new SpaceUsageAnalyzeVO();
-        vo.setAllSpace(spaceId == null);
+        vo.setAllSpace(spaceId == null || spaceId == 0);
 
-        if (spaceId != null) {
+        if (spaceId != null && spaceId > 0) {
             // 单个空间：用量字段由上传 / 删除时维护，直接读空间记录即可
             Space space = spaceMapper.selectById(spaceId);
             vo.setUsedSize(space.getTotalSize());
@@ -268,7 +268,7 @@ public class SpaceAnalyzeServiceImpl implements SpaceAnalyzeService {
      * 既是数据错误，也会把别人的空间数据泄露给空间创建者。
      */
     private void applySpaceScope(QueryWrapper<Picture> wrapper, Long spaceId) {
-        if (spaceId != null) {
+        if (spaceId != null && spaceId > 0) {
             wrapper.eq("spaceId", spaceId);
         }
     }
@@ -280,7 +280,7 @@ public class SpaceAnalyzeServiceImpl implements SpaceAnalyzeService {
         ThrowUtils.throwIf(analyzeRequest == null, ErrorCode.PARAMS_ERROR);
         ThrowUtils.throwIf(loginUser == null || loginUser.getId() == null,
                 ErrorCode.NOT_LOGIN_ERROR, "未登录");
-        if (analyzeRequest.getSpaceId() != null) {
+        if (analyzeRequest.getSpaceId() != null && analyzeRequest.getSpaceId() > 0) {
             Space space = spaceMapper.selectById(analyzeRequest.getSpaceId());
             SpacePermissionUtils.checkSpaceViewAuth(space, loginUser, userService, spaceUserService);
         } else if (!userService.isAdmin(loginUser)) {

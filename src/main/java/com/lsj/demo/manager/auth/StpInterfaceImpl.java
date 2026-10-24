@@ -71,7 +71,7 @@ public class StpInterfaceImpl implements StpInterface {
         List<String> ADMIN_PERMISSIONS = spaceUserAuthManager.getPermissionsByRole(SpaceRoleEnum.ADMIN.getValue());
         // 获取上下文对象
         SpaceUserAuthContext authContext = getAuthContextByRequest();
-        // 如果所有字段都为空，表示查询公共图库，可以通过
+        // 如果所有字段都为空，表示请求没有携带任何空间/图片上下文（例如无参 POST），放行由业务层兜底
         if (isAllFieldsNull(authContext)) {
             return ADMIN_PERMISSIONS;
         }
@@ -110,8 +110,8 @@ public class StpInterfaceImpl implements StpInterface {
         }
         // 如果没有 spaceUserId，尝试通过 spaceId 或 pictureId 获取 Space 对象并处理
         Long spaceId = authContext.getSpaceId();
-        if (spaceId == null) {
-            // 如果没有 spaceId，通过 pictureId 获取 Picture 对象和 Space 对象
+        if (spaceId == null || spaceId == 0) {
+            // 没有 spaceId（或公共图库），通过 pictureId 获取 Picture 对象和 Space 对象
             Long pictureId = authContext.getPictureId();
             // 图片 id 也没有，则默认通过权限校验
             if (pictureId == null) {
@@ -126,7 +126,7 @@ public class StpInterfaceImpl implements StpInterface {
             }
             spaceId = picture.getSpaceId();
             // 公共图库，仅本人或管理员可操作
-            if (spaceId == null) {
+            if (spaceId == null || spaceId == 0) {
                 if (picture.getUserId().equals(userId) || userService.isAdmin(loginUser)) {
                     return ADMIN_PERMISSIONS;
                 } else {

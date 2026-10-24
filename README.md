@@ -84,6 +84,7 @@
 | 语言 / 构建 | Java 8 语言级别（构建与运行使用 JDK 17）、Maven 3.8 |
 | 后端框架 | Spring Boot 2.6.13、Spring AOP、Sa-Token 1.39.0（登录态 + 角色/权限校验，会话存 Redis） |
 | 持久层 | MyBatis-Plus 3.5.9（含 `mybatis-plus-jsqlparser` 分页插件）、MySQL 8、逻辑删除、雪花 ID |
+| 分库分表 | ShardingSphere-JDBC 5.2.0（`picture` 按 `spaceId` 分表，团队空间一空间一表） |
 | 缓存 | Caffeine 3.1.8（本地一级）+ Redis / Spring Data Redis（分布式二级 + Sa-Token 会话） |
 | 对象存储 | 腾讯云 COS Java SDK 5.6.227 + 数据万象（上传即产出 webp 压缩图） |
 | 工具库 | Hutool 5.8.26（HTTP / 文件 / 日期）、jsoup 1.15.3（抓取解析）、Lombok |
@@ -191,7 +192,7 @@ processFile(输入, 文件) → 落地临时文件（本地转存 / 远程下载
 
 ### 3. 列表性能：Caffeine → Redis → MySQL 三级读取
 
-- 只缓存**与用户身份无关**的公开数据：查询条件被强制为 `reviewStatus = 已通过` 且 `spaceId IS NULL`，因此缓存可以共用同一个 key，不会串号；
+- 只缓存**与用户身份无关**的公开数据：查询条件被强制为 `reviewStatus = 已通过` 且 `spaceId = 0`，因此缓存可以共用同一个 key，不会串号；
 - 缓存 key 由真正影响结果的字段拼装后取 MD5，标签列表先排序再入 key（顺序不同不应产生两份缓存）；
 - Redis TTL = 5 分钟 + 0~5 分钟随机抖动，避免同一时刻批量 key 失效造成缓存雪崩；Caffeine 本地缓存 5 分钟，比 Redis 稍短，两级自然错开；
 - 图片增删改、审核后清理本地缓存；Redis 侧靠 TTL 自然过期（单机部署可接受，多实例部署的处理方式已在代码注释中写明）。
@@ -204,14 +205,24 @@ processFile(输入, 文件) → 落地临时文件（本地转存 / 远程下载
 
 ### 5. 空间模型：公共图库 / 私有空间 / 团队空间 + 配额
 
-- `spaceId` 为空表示**公共图库**（所有人可见）；不为空表示**私有/团队空间**，按空间类型与成员角色控制可见性与操作权限；
+- `spaceId = 0` 表示**公共图库**（所有人可见）；`> 0` 表示**私有/团队空间**，按空间类型与成员角色控制可见性与操作权限；
 - 空间类型分两类：**私有空间**（仅创建者与管理员可见可操作）与**团队空间**（成员可查看，admin / editor 角色成员可操作），每用户各限 1 个；
 - 空间级别（普通版 100 张 / 100MB，专业版 1000 张 / 1GB，旗舰版 10000 张 / 10GB）在建空间时自动填充限额，非管理员只能创建普通版；
 - 上传先校验数量（放不下就不用白跑一趟上传），拿到真实体积后再校验容量，**超限会把刚传上去的文件从对象存储删掉**，不留垃圾；
 - 用量（`totalCount` / `totalSize`）用 SQL 原子自增自减维护（`totalCount = totalCount + (?)`），避免「先查再更新」在并发上传时丢更新；
-- 公共列表查询会**显式追加 `spaceId IS NULL`**：不加这个条件，私有空间里的图片会出现在公共图库中（越权泄漏）。
+- 公共列表查询会**显式追加 `spaceId = 0`**：不加这个条件，私有空间里的图片会出现在公共图库中（越权泄漏）。
 
-### 6. 权限模型：Sa-Token 统一登录态与空间角色
+### 6. 分表：团队空间「一个空间一张表」
+
+- 只对 `picture` 表分片，`user` / `space` / `space_user` 保持单表；**只有团队空间分表**，私有空间与公共图库共用原表 `picture`；
+- 分片键 `spaceId`（`0` = 公共图库，`> 0` = 私有/团队空间）。`PictureShardingAlgorithm` 对 `> 0` 返回 `picture_<spaceId>`，对 `0`/`null` 返回原表 `picture`；返回前必须校验表在不在 `actual-data-nodes` 里，不在就**主动回退原表**：5.2.0 的 `StandardShardingStrategy` 对非法表名直接抛 `ShardingRouteAlgorithmException`，且 **message 为空**，很容易误判成「表不存在」；
+- 路由节点由 `DynamicShardingManager` 动态维护：团队空间创建时 `CREATE TABLE IF NOT EXISTS picture_<spaceId> LIKE picture`，再把所有未删除团队空间的表名拼回 `actual-data-nodes`（`alterRuleConfiguration` + `reloadDatabase`）；
+- 建表必须在事务**提交之后**做：MySQL 的 DDL 会隐式提交当前事务，塞进 `transactionTemplate` 会让「空间入库」变成不可回滚的半步操作；
+- 启动时先补建历史团队空间缺失的分表，再刷新节点 —— **顺序不能反**，节点里出现不存在的表会让该空间所有查询报表不存在；
+- 不带 `spaceId` 的查询（按 `id` 查详情、管理员审核列表）会被广播到全部分表再 `UNION ALL` 合并，功能正确但扫描成本翻倍，属于分片的固有代价；
+- 空间逻辑删除后分表**不自动 drop**（避免误删数据），重启后该表会从路由节点中剔除，数据留在库里。
+
+### 7. 权限模型：Sa-Token 统一登录态与空间角色
 
 - **登录态**：`StpKit.SPACE.login(userId)` 签发 token 写入 Cookie（`satoken`，**已开启 HttpOnly**——JS 读不到，靠浏览器自动携带，XSS 抄不走），前端沿用 `credentials: 'include'` 无需改动；会话存 Redis（`sa-token-redis-jackson`），重启/多实例不丢登录态；
 - **两套 StpLogic**：默认的 `StpUtil` 与 `StpKit.SPACE`（`new StpLogic("space")`）是两个独立账号体系，项目只用后者；注解靠 `type = "space"` 指定走这一套，`StpInterface` 里也按 `loginType` 分流；
@@ -220,12 +231,12 @@ processFile(输入, 文件) → 落地临时文件（本地转存 / 远程下载
 - **会话清理**：删除用户、以及管理员变更用户角色时调用 `StpKit.SPACE.logout(userId)` 踢掉该用户所有端口，避免 token 在 Redis 里空转到 30 天超时；只改昵称之类普通字段不踢，避免误伤；
 - **未登录 / 无权限**：`GlobalExceptionHandler` 统一映射 `NotLoginException → 40100`、`NotPermissionException/NotRoleException → 40101`，与原有错误码语义一致，前端无感。
 
-### 7. 批量抓取
+### 8. 批量抓取
 
 解析必应图片搜索的异步结果片段，优先取结果条目 `m` 属性里的 `murl`（原图直链），
 依次回退到 `murl` / `data-src` / `absUrl(src)`，并处理协议相对地址；同一批内按地址去重、单张失败不影响其余、数量有上限。
 
-### 8. 前端：零依赖的模块化 SPA
+### 9. 前端：零依赖的模块化 SPA
 
 - hash 路由 + `import()` 视图懒加载，模块按 `api / ui / components / views` 分层，改完刷新即生效，没有构建步骤；
 - 统一请求封装：自动解包 `BaseResponse`、携带 `credentials: 'include'` 维持登录态、`40100` 自动清理登录态并跳登录页；
@@ -251,6 +262,10 @@ processFile(输入, 文件) → 落地临时文件（本地转存 / 远程下载
 | Lombok 与 JDK 21 不兼容 | JDK 21 下编译报 `NoSuchFieldError: JCTree$JCImport.qualid` | 构建统一使用 JDK 17（Docker 构建镜像同样固定 17） |
 | 图片 403 裂图 | 接口正常但 COS 图片 URL 返回 `AccessDenied`：桶是私有读、上传未设对象 ACL；或触发桶的防盗链 Referer 白名单拦截 | 上传后对原图与缩略图设置对象公有读 ACL，并提供批量修复接口；防盗链白名单需在控制台放行前端域名/localhost |
 | 后端端口被环境变量覆盖 | 会话注入 `SERVER__PORT`（Spring Boot relaxed binding）优先级高于 `application.yml` 的 `server.port`，后端实际监听了别的端口 | 启动时显式 `SERVER_PORT=8666 -Dserver.port=8666` 覆盖 |
+| 分片路由异常但没信息 | 团队空间查询抛 `ShardingRouteAlgorithmException`，**message 是空的**，看上去像「表不存在」 | 真因是算法返回的表名不在 `actual-data-nodes` 展开集合里（`StandardShardingStrategy` 会做 `contains` 校验）。算法内改为「不在集合就回退原表」 |
+| 动态分表数据源名写错 | 启动报 `Missing the data source name: 'yu_picture'` | 拼 `actual-data-nodes` 时前缀要用 `spring.shardingsphere.datasource.names` 里的**数据源名**，不是数据库名（本项目是 `picture`） |
+| 分表节点混进不存在的表 | 查询某个团队空间报 `Table doesn't exist` | 生成表名的条件必须和建表条件一致；启动时先补建缺失分表、再刷新路由节点，顺序反了必崩 |
+| 公共图库查询路由到团队分表 | `spaceId=0` 查公共图库时，SQL 被路由到 `actual-data-nodes` 的第一张分表，返回 0 条 | SQL 里出现了**两条重复的 `spaceId=0`**（`getQueryWrapper` 拼一次、查询方法又 `eq("spaceId",0)` 一次），ShardingSphere 提取不到唯一分片键。解法：公共图库只让 `getQueryWrapper` 拼一次 `spaceId=0`，查询方法里归一化 `setSpaceId(0L)` 后不要再手动追加 |
 
 ---
 
@@ -277,6 +292,8 @@ mysql -uroot -p < deploy/mysql/init.sql
 `user`（用户）、`picture`（图片，审核字段与 `spaceId` 直接建在表里）、`space`（空间，含 `spaceType` 类型字段）、`space_user`（空间成员关联）。
 
 > 若从旧库升级，`sql/create_table_spaceuser.sql` 单独建空间成员表，其它字段变更见 `deploy/mysql/migration-*.sql`。
+>
+> **分表不用手工建**：团队空间的分表 `picture_<spaceId>` 由程序在「创建空间时」和「应用启动时」自动 `CREATE TABLE IF NOT EXISTS ... LIKE picture`，初始化脚本里只需要原表 `picture`。
 
 ### 2. 配置
 
@@ -362,10 +379,10 @@ UPDATE user SET userRole = 'admin' WHERE userAccount = '你的账号';
 
 | 方法 | 路径 | 说明 | 权限 |
 | --- | --- | --- | --- |
-| POST | `/picture/upload` | 上传本地文件（可带 `id` 覆盖、`spaceId` 上传到空间） | 登录 |
+| POST | `/picture/upload` | 上传本地文件（可带 `id` 覆盖、`spaceId` 上传到空间，`spaceId=0` 为公共图库） | 登录 |
 | POST | `/picture/upload/url` | 图片链接导入 | 登录 |
 | POST | `/picture/upload/batch` | 关键词批量抓取 | 管理员 |
-| POST | `/picture/list/page/vo` | 分页查询（`spaceId` 为空查公共图库，不为空查自己的空间） | 公开 / 空间创建者 |
+| POST | `/picture/list/page/vo` | 分页查询（`spaceId=0` 查公共图库，`>0` 查自己的空间） | 公开 / 空间创建者 |
 | POST | `/picture/list/page/vo/cache` | 分页查询（多级缓存，仅公共图库） | 公开 |
 | GET | `/picture/get/vo` | 图片详情（私有空间的图片仅创建者可见） | 公开 / 空间创建者 |
 | POST | `/picture/edit` | 编辑自己的图片 | 本人或管理员 |

@@ -45,13 +45,13 @@ public class PicturePermissionUtils {
         ThrowUtils.throwIf(picture == null, ErrorCode.PARAMS_ERROR, "图片不能为空");
         ThrowUtils.throwIf(loginUser == null || loginUser.getId() == null, ErrorCode.NO_AUTH_ERROR);
         Long spaceId = picture.getSpaceId();
-        if (spaceId != null) {
+        if (spaceId != null && spaceId > 0) {
             // 空间图片：私有空间仅创建者可操作；团队空间按成员角色放行，复用空间的权限规则
             Space space = spaceService.getById(spaceId);
             SpacePermissionUtils.checkSpaceAuth(space, loginUser, userService, spaceUserService);
             return;
         }
-        // 公共空间：上传者本人直接放行，其余人只有管理员能操作
+        // 公共图库（spaceId=0）：上传者本人直接放行，其余人只有管理员能操作
         if (loginUser.getId().equals(picture.getUserId())) {
             return;
         }

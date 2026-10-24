@@ -25,6 +25,8 @@ const DEFAULT_COLOR_DISTANCE = 80;
 const query = {
   current: 1,
   pageSize: PAGE_SIZE,
+  // 首页是公共图库，spaceId 固定传 0（后端约定：0 = 公共图库，>0 = 私有/团队空间）
+  spaceId: 0,
   searchText: '',
   category: '',
   // 按主色调（腾讯云 imageAve 返回）查图：picColor 为空表示不按颜色筛选

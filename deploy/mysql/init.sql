@@ -58,7 +58,7 @@ CREATE TABLE IF NOT EXISTS `picture`
     picColorG     tinyint unsigned                   NULL COMMENT '主色调 G 分量（0-255）',
     picColorB     tinyint unsigned                   NULL COMMENT '主色调 B 分量（0-255）',
     userId        bigint                             NOT NULL COMMENT '创建用户 id',
-    spaceId       bigint                             NULL COMMENT '空间 id（为空表示公共空间）',
+    spaceId       bigint                             NOT NULL DEFAULT 0 COMMENT '空间 id（0 表示公共图库，>0 表示私有/团队空间）',
     reviewStatus  int      DEFAULT 0                 NOT NULL COMMENT '审核状态：0-待审核; 1-通过; 2-拒绝',
     reviewMessage varchar(512)                       NULL COMMENT '审核信息',
     reviewerId    bigint                             NULL COMMENT '审核人 ID',
@@ -78,7 +78,7 @@ CREATE TABLE IF NOT EXISTS `picture`
 
 -- 空间表
 -- 说明：私有空间是图片的容器，picture.spaceId 指向这里；
---     spaceId 为空的图片属于「公共图库」，参与大众审核与展示。
+--     spaceId = 0 的图片属于「公共图库」，参与大众审核与展示。
 CREATE TABLE IF NOT EXISTS `space`
 (
     id         bigint AUTO_INCREMENT COMMENT 'id' PRIMARY KEY,

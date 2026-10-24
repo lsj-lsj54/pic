@@ -36,6 +36,50 @@ spring:
     #   - 部署时用环境变量 SPRING_DATASOURCE_USERNAME / SPRING_DATASOURCE_PASSWORD（见 deploy/docker-compose.yml）
     username: ${MYSQL_USERNAME:root}
     password: ${MYSQL_PASSWORD:}
+  # ==================== 分表（ShardingSphere 5.2.0）====================
+  # 只把 picture 表按 spaceId 拆分，且**只对团队空间分表**；私有空间和公共图库共用原表 picture。
+  # space / space_user / user 三张表保持单表，走同一个数据源。
+  #
+  # 注意：这个 starter 一旦在 classpath 上，它提供的 DataSource 会取代 spring.datasource 成为唯一数据源，
+  # 所以 url / 账号密码必须在这里配全。下面直接用 ${spring.datasource.xxx} 引用上面那三行，
+  # 这样 application-local.yml 的本地密码、以及部署时的环境变量注入都继续生效，不用维护两份。
+  shardingsphere:
+    datasource:
+      names: picture
+      picture:
+        type: com.zaxxer.hikari.HikariDataSource
+        driver-class-name: ${spring.datasource.driver-class-name}
+        url: ${spring.datasource.url}
+        username: ${spring.datasource.username}
+        password: ${spring.datasource.password}
+    rules:
+      sharding:
+        tables:
+          # 这里写的是**启动时的初始值**，运行后会被 DynamicShardingManager 覆盖：
+          # 它把所有未删除团队空间拼成 picture.picture_<id>,...,picture.picture
+          # 再调 alterRuleConfiguration 写回 ShardingSphere。
+          #
+          # 不要把真实表在这里写死成 $->{0..1} 之类的枚举：本项目的分表是
+          # 「一个空间一张表」（picture_<spaceId>），表在空间创建时才建，数量不固定。
+          picture:
+            actual-data-nodes: picture.picture
+            table-strategy:
+              standard:
+                sharding-column: spaceId
+                sharding-algorithm-name: picture_sharding_algorithm
+        sharding-algorithms:
+          picture_sharding_algorithm:
+            type: CLASS_BASED
+            props:
+              # 这两个 key 必须写成驼峰。5.2.0 的 ClassBasedShardingAlgorithm 是直接按字面量
+              # 取 "strategy" 和 "algorithmClassName"，写成 algorithm-class-name 会报
+              # "Properties `algorithmClassName` can not be null"
+              strategy: standard
+              algorithmClassName: com.lsj.demo.manager.sharding.PictureShardingAlgorithm
+    # sql-show 是全局属性，必须放在 rules 外面；
+    # 写在 rules.sharding.props 下不会生效（那里是分片规则自己的属性）。
+    props:
+      sql-show: true
 # Sa-Token 配置
 # 登录态改用 Sa-Token 管理：登录后 token 写入 Cookie（satoken），前端沿用 credentials: 'include'，
 # 无需改动前端即可维持登录态。会话数据存 Redis（sa-token-redis-jackson）。
@@ -79,6 +123,7 @@ mybatis-plus:
       logic-delete-field: isDelete # 全局逻辑删除的实体字段名
       logic-delete-value: 1 # 逻辑已删除值（默认为 1）
       logic-not-delete-value: 0 # 逻辑未删除值（默认为 0）
+    enable-sql-runner: true
 # 接口文档配置
 knife4j:
   enable: true

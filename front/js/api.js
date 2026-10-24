@@ -157,7 +157,7 @@ export const pictureApi = {
    *
    * @param {File}   file    图片文件
    * @param {string} [id]    图片 id，传了表示覆盖已有图片
-   * @param {string} [spaceId] 空间 id，传了表示上传到该私有空间
+   * @param {string} [spaceId] 空间 id，缺省传 0 表示上传到公共图库
    */
   upload: (file, id, spaceId) => {
     const formData = new FormData();
@@ -166,9 +166,8 @@ export const pictureApi = {
       // 后端 PictureUploadRequest.id 是 Long，表单字段用字符串即可绑定
       formData.append('id', String(id));
     }
-    if (spaceId !== undefined && spaceId !== null && spaceId !== '') {
-      formData.append('spaceId', String(spaceId));
-    }
+    // 统一携带 spaceId：公共图库传 0，私有/团队空间传对应空间 id
+    formData.append('spaceId', String(spaceId === undefined || spaceId === null || spaceId === '' ? 0 : spaceId));
     return request('/picture/upload', { method: 'POST', body: formData });
   },
   /**
@@ -176,16 +175,15 @@ export const pictureApi = {
    *
    * @param {string}      pictureUrl 图片地址
    * @param {string}      [id]       图片 id，传了表示覆盖已有图片
-   * @param {string}      [spaceId]  空间 id，传了表示上传到该私有空间
+   * @param {string}      [spaceId]  空间 id，缺省传 0 表示上传到公共图库
    */
   uploadByUrl: (pictureUrl, id, spaceId) => {
     const body = { pictureUrl };
     if (id !== undefined && id !== null && id !== '') {
       body.id = String(id);
     }
-    if (spaceId !== undefined && spaceId !== null && spaceId !== '') {
-      body.spaceId = String(spaceId);
-    }
+    // 统一携带 spaceId：公共图库传 0，私有/团队空间传对应空间 id
+    body.spaceId = String(spaceId === undefined || spaceId === null || spaceId === '' ? 0 : spaceId);
     return request('/picture/upload/url', { method: 'POST', body });
   },
   /** 删除图片（本人或管理员） */
@@ -229,7 +227,7 @@ export const pictureApi = {
  * <p>
  * 规则与后端一致：私有空间只有创建者（或管理员）能查看和修改；
  * 团队空间（spaceType = 1）的成员按角色获得查看/操作权限；
- * `spaceId` 为空表示公共空间，不为空表示对应的私有/团队空间。
+ * `spaceId = 0` 表示公共图库，`> 0` 表示对应的私有/团队空间。
  */
 export const spaceApi = {
   /**

@@ -175,7 +175,7 @@ class PictureSpaceAuthTest {
         ArgumentCaptor<Wrapper<Picture>> captor = ArgumentCaptor.forClass(Wrapper.class);
         verify(service).page(any(), captor.capture());
         String sql = captor.getValue().getSqlSegment().toLowerCase();
-        assertTrue(sql.contains("spaceid is null"),
+        assertTrue(sql.contains("spaceid = "),
                 "没有限定只查公共空间，会把别人私有空间里的图片一起查出来: " + sql);
     }
 
@@ -363,7 +363,7 @@ class PictureSpaceAuthTest {
         PictureVO pictureVO = service.uploadPicture(pngFile(), request, user(OWNER_ID));
 
         assertNotNull(pictureVO);
-        assertNull(pictureVO.getSpaceId());
+        assertEquals(0L, pictureVO.getSpaceId(), "公共图库图片的 spaceId 应为 0");
         verify(spaceService, never()).updateSpaceUsage(anyLong(), anyLong(), anyLong());
     }
 }
