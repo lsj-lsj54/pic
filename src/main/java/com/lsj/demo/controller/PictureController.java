@@ -4,6 +4,7 @@ import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.lsj.demo.annotation.AuthCheck;
+import com.lsj.demo.annotation.RateLimit;
 import com.lsj.demo.common.BaseResponse;
 import com.lsj.demo.common.DeleteRequest;
 import com.lsj.demo.common.PicturePermissionUtils;
@@ -12,6 +13,7 @@ import com.lsj.demo.exception.BusinessException;
 import com.lsj.demo.exception.ErrorCode;
 import com.lsj.demo.exception.ThrowUtils;
 import com.lsj.demo.manager.auth.annotation.SaSpaceCheckPermission;
+import com.lsj.demo.manager.PictureBloomFilter;
 import com.lsj.demo.model.constant.SpaceUserPermissionConstant;
 import com.lsj.demo.model.constant.UserConstant;
 import com.lsj.demo.model.dto.picture.*;
@@ -73,6 +75,12 @@ public class PictureController {
     private SpaceUserService spaceUserService;
 
     /**
+     * 图片 id 布隆过滤器：查询前预判，防缓存穿透
+     */
+    @Resource
+    private PictureBloomFilter pictureBloomFilter;
+
+    /**
      * 上传图片（本地文件，可重新上传）
      * <p>
      * 权限：{@code picture:upload}。请求带 spaceId 时校验该空间的上传权限；
@@ -85,6 +93,7 @@ public class PictureController {
      */
     @PostMapping("/upload")
     @SaSpaceCheckPermission(SpaceUserPermissionConstant.PICTURE_UPLOAD)
+    @RateLimit(key = "upload", rate = 10, windowSeconds = 60)
     public BaseResponse<PictureVO> uploadPicture(@RequestPart(value = "file", required = false) MultipartFile multipartFile,
                                                  PictureUploadRequest pictureUploadRequest,
                                                  HttpServletRequest request) {
@@ -106,6 +115,7 @@ public class PictureController {
      */
     @PostMapping("/upload/url")
     @SaSpaceCheckPermission(SpaceUserPermissionConstant.PICTURE_UPLOAD)
+    @RateLimit(key = "upload", rate = 10, windowSeconds = 60)
     public BaseResponse<PictureVO> uploadPictureByUrl(@RequestBody PictureUploadRequest pictureUploadRequest,
                                                       HttpServletRequest request) {
         ThrowUtils.throwIf(pictureUploadRequest == null
@@ -189,6 +199,8 @@ public class PictureController {
     @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
     public BaseResponse<Picture> getPictureById(long id) {
         ThrowUtils.throwIf(id <= 0, ErrorCode.PARAMS_ERROR);
+        // 布隆过滤器预判：id 一定不存在时直接返回，不查库（防缓存穿透）
+        ThrowUtils.throwIf(!pictureBloomFilter.mightContain(id), ErrorCode.NOT_FOUND_ERROR);
         // 查询数据库
         Picture picture = pictureService.getById(id);
         ThrowUtils.throwIf(picture == null, ErrorCode.NOT_FOUND_ERROR);
@@ -205,6 +217,8 @@ public class PictureController {
     @GetMapping("/get/vo")
     public BaseResponse<PictureVO> getPictureVOById(long id, HttpServletRequest request) {
         ThrowUtils.throwIf(id <= 0, ErrorCode.PARAMS_ERROR);
+        // 布隆过滤器预判：id 一定不存在时直接返回，不查库（防缓存穿透）
+        ThrowUtils.throwIf(!pictureBloomFilter.mightContain(id), ErrorCode.NOT_FOUND_ERROR);
         // 查询数据库
         Picture picture = pictureService.getById(id);
         ThrowUtils.throwIf(picture == null, ErrorCode.NOT_FOUND_ERROR);

@@ -37,7 +37,10 @@ import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.util.CollectionUtils;
+import org.redisson.api.RLock;
+import org.redisson.api.RedissonClient;
 
+import javax.annotation.Resource;
 import javax.servlet.http.HttpServletRequest;
 import java.util.Collections;
 import java.util.List;
@@ -45,7 +48,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 
@@ -86,9 +89,10 @@ public class SpaceServiceImpl extends ServiceImpl<SpaceMapper, Space>
     private DynamicShardingManager dynamicShardingManager;
 
     /**
-     * 按用户加锁：同一个账号并发创建空间时，防止插入两条同名空间
+     * Redisson 客户端：用分布式锁替代本地 synchronized，保证多实例下空间创建去重依然有效
      */
-    private final Map<Long, Object> lockmap = new ConcurrentHashMap<>();
+    @Resource
+    private RedissonClient redissonClient;
 
     public SpaceServiceImpl(UserService userService, SpaceUserService spaceUserService,
                             TransactionTemplate transactionTemplate) {
@@ -168,42 +172,53 @@ public class SpaceServiceImpl extends ServiceImpl<SpaceMapper, Space>
         if (!userService.isAdmin(loginUser) && !SpaceLevelEnum.COMMON.equals(spaceLevelEnum)) {
             throw new BusinessException(ErrorCode.FORBIDDEN_ERROR, "非管理员只能创建普通空间");
         }
-        // 同一用户串行创建，避免并发提交绕过去重校验
-        Object lock = lockmap.computeIfAbsent(loginUser.getId(), k -> new Object());
-        synchronized (lock) {
-            try {
-                Long newSpaceId = transactionTemplate.execute(status -> {
-                    // 每个用户每种类型的空间只能创建一个：一个私有空间 + 一个团队空间
-                    SpaceQueryRequest spaceQueryRequest = new SpaceQueryRequest();
-                    spaceQueryRequest.setUserId(loginUser.getId());
-                    spaceQueryRequest.setSpaceType(space.getSpaceType());
-                    long count = this.count(getQueryWrapper(spaceQueryRequest));
-                    boolean isTeam = SpaceTypeEnum.TEAM.getValue() == space.getSpaceType();
-                    ThrowUtils.throwIf(count > 0, ErrorCode.PARAMS_ERROR,
-                            isTeam ? "每个用户只能创建一个团队空间" : "每个用户只能创建一个私有空间");
-                    ThrowUtils.throwIf(!save(space), ErrorCode.SYSTEM_ERROR, "数据库插入失败");
-                    // 团队空间：把创建者写入成员表并设为管理员，后续邀请的成员才能基于角色鉴权。
-                    // 与空间创建在同一事务中，任何一步失败都会整体回滚
-                    if (isTeam) {
-                        SpaceUser spaceUser = new SpaceUser();
-                        spaceUser.setSpaceId(space.getId());
-                        spaceUser.setUserId(loginUser.getId());
-                        spaceUser.setSpaceRole(SpaceRoleEnum.ADMIN.getValue());
-                        ThrowUtils.throwIf(!spaceUserService.save(spaceUser),
-                                ErrorCode.SYSTEM_ERROR, "创建团队成员记录失败");
-                    }
-                    return space.getId();
-                });
-                long spaceId = Optional.ofNullable(newSpaceId).orElse(-1L);
-                // 团队空间创建独立分表 picture_{spaceId}。
-                // 必须放在事务外面：MySQL 的 DDL 会隐式提交当前事务，
-                // 放进 transactionTemplate 里会让整个创建流程失去回滚能力。
-                if (spaceId > 0) {
-                    dynamicShardingManager.createSpacePictureTable(space);
+        // 同一用户串行创建，避免并发提交绕过去重校验。
+        // 用 Redisson 分布式锁替代本地 synchronized：本地锁只能锁住单机，
+        // 分布式锁才能保证「一个账号每种类型只能建一个空间」在集群部署下依然成立。
+        RLock lock = redissonClient.getLock("space:add:" + loginUser.getId());
+        boolean locked = false;
+        try {
+            // 最多等 3 秒拿锁，锁最多持 30 秒（防死锁自动释放）
+            locked = lock.tryLock(3, 30, TimeUnit.SECONDS);
+            ThrowUtils.throwIf(!locked, ErrorCode.SYSTEM_ERROR, "系统繁忙，请稍后重试");
+            Long newSpaceId = transactionTemplate.execute(status -> {
+                // 每个用户每种类型的空间只能创建一个：一个私有空间 + 一个团队空间
+                SpaceQueryRequest spaceQueryRequest = new SpaceQueryRequest();
+                spaceQueryRequest.setUserId(loginUser.getId());
+                spaceQueryRequest.setSpaceType(space.getSpaceType());
+                long count = this.count(getQueryWrapper(spaceQueryRequest));
+                boolean isTeam = SpaceTypeEnum.TEAM.getValue() == space.getSpaceType();
+                ThrowUtils.throwIf(count > 0, ErrorCode.PARAMS_ERROR,
+                        isTeam ? "每个用户只能创建一个团队空间" : "每个用户只能创建一个私有空间");
+                ThrowUtils.throwIf(!save(space), ErrorCode.SYSTEM_ERROR, "数据库插入失败");
+                // 团队空间：把创建者写入成员表并设为管理员，后续邀请的成员才能基于角色鉴权。
+                // 与空间创建在同一事务中，任何一步失败都会整体回滚
+                if (isTeam) {
+                    SpaceUser spaceUser = new SpaceUser();
+                    spaceUser.setSpaceId(space.getId());
+                    spaceUser.setUserId(loginUser.getId());
+                    spaceUser.setSpaceRole(SpaceRoleEnum.ADMIN.getValue());
+                    ThrowUtils.throwIf(!spaceUserService.save(spaceUser),
+                            ErrorCode.SYSTEM_ERROR, "创建团队成员记录失败");
                 }
-                return spaceId;
-            } finally {
-                lockmap.remove(loginUser.getId());
+                return space.getId();
+            });
+            long spaceId = Optional.ofNullable(newSpaceId).orElse(-1L);
+            // 团队空间创建独立分表 picture_{spaceId}。
+            // 必须放在事务外面：MySQL 的 DDL 会隐式提交当前事务，
+            // 放进 transactionTemplate 里会让整个创建流程失去回滚能力。
+            if (spaceId > 0) {
+                dynamicShardingManager.createSpacePictureTable(space);
+            }
+            return spaceId;
+        } catch (InterruptedException e) {
+            // tryLock 被打断：恢复中断标记，按「系统繁忙」处理
+            Thread.currentThread().interrupt();
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "系统繁忙，请稍后重试");
+        } finally {
+            // 只有拿到锁才释放，避免释放别人的锁
+            if (locked) {
+                lock.unlock();
             }
         }
     }

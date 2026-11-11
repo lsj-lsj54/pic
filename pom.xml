@@ -157,6 +157,13 @@
             <version>5.2.0</version>
         </dependency>
 
+        <!-- Redisson：分布式锁 / 布隆过滤器 / 限流器（与 Spring Data Redis 的 Lettuce 并存，各管各的连接） -->
+        <dependency>
+            <groupId>org.redisson</groupId>
+            <artifactId>redisson</artifactId>
+            <version>3.17.7</version>
+        </dependency>
+
 
 
 

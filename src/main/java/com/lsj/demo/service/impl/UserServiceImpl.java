@@ -194,6 +194,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
         //    - 同时把 User 放进会话，供 StpInterfaceImpl 计算空间权限时直接取用，避免每次再查库
         try {
             StpKit.SPACE.login(user.getId());
+            //todo这里的USER_LOGIN_STATE字面意思是状态，而user其实是包括不止状态的，后续改名
             StpKit.SPACE.getSession().set(USER_LOGIN_STATE, user);
         } catch (org.springframework.dao.DataAccessException e) {
             // Redis 不可用（连接失败/超时）时 Sa-Token 无法写入会话，
@@ -231,6 +232,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
      * @param request request 请求
      * @return 当前登录用户，未登录或用户已被删除时返回 null
      */
+    //todo这个函数的参数是没有用的，后续为了代码整洁可以删除
     @Override
     public User getLoginUserOrNull(HttpServletRequest request) {
         // 未登录时返回 null 而不抛异常，供「登录可见全部、未登录只看公开内容」的接口使用
@@ -238,7 +240,9 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
             long userId = StpKit.SPACE.getLoginIdAsLong();
             User currentUser = (User) StpKit.SPACE.getSession().get(USER_LOGIN_STATE);
             if (currentUser == null) {
-                currentUser = this.getById(userId);
+                //todo这里应该是直接返回return null吧因为satoken在登录时就把user完整保存进去了,id就是在user里取出来的，如果user空了，那id也肯定为空，没必要再查了
+                //currentUser = this.getById(userId);
+                return null;
             }
             return currentUser;
         } catch (Exception e) {

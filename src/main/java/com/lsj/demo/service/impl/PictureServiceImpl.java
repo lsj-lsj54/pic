@@ -23,6 +23,7 @@ import com.lsj.demo.manager.CosManager;
 import cn.hutool.core.util.StrUtil;
 import com.lsj.demo.manager.factory.UploadFactory;
 import com.lsj.demo.manager.uplode.PictureUploadTemplate;
+import com.lsj.demo.manager.PictureBloomFilter;
 import com.lsj.demo.model.dto.picture.PictureQueryRequest;
 import com.lsj.demo.model.dto.picture.PictureReviewRequest;
 import com.lsj.demo.model.dto.picture.PictureUploadByBatchRequest;
@@ -125,6 +126,12 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
 
     @Resource
     private CosManager cosManager;
+
+    /**
+     * 图片 id 布隆过滤器：上传时写入，查询时防穿透
+     */
+    @Resource
+    private PictureBloomFilter pictureBloomFilter;
 
     /**
      * 图片列表缓存的 key 前缀
@@ -277,6 +284,8 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         }
         boolean result = this.saveOrUpdate(picture);
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR, "图片上传失败");
+        // 新图片 id 写入布隆过滤器，供查询防缓存穿透
+        pictureBloomFilter.add(picture.getId());
         // 维护空间用量：图片离开旧空间要扣减，进入新空间要累加；公共图库（spaceId=0）不维护用量
         if (oldSpaceId != null && oldSpaceId > 0 && !oldSpaceId.equals(spaceId)) {
             spaceService.updateSpaceUsage(oldSpaceId, -1L, -oldSize);

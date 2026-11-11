@@ -2,6 +2,7 @@ package com.lsj.demo.controller;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.lsj.demo.annotation.AuthCheck;
+import com.lsj.demo.annotation.RateLimit;
 import com.lsj.demo.common.BaseResponse;
 import com.lsj.demo.common.DeleteRequest;
 import com.lsj.demo.common.ResultUtils;
@@ -71,6 +72,7 @@ public class UserController {
      * @return 脱敏后的登录用户信息
      */
     @PostMapping("/login")
+    @RateLimit(key = "login", rate = 30, windowSeconds = 60)
     public BaseResponse<LoginUserVO> userLogin(@RequestBody UserLoginRequest userLoginRequest, HttpServletRequest request) {
         ThrowUtils.throwIf(userLoginRequest == null, ErrorCode.PARAMS_ERROR);
         String userAccount = userLoginRequest.getUserAccount();

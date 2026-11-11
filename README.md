@@ -7,6 +7,8 @@
 ![MySQL](https://img.shields.io/badge/MySQL-8.0-4479a1)
 ![Redis](https://img.shields.io/badge/Redis-7-dc382d)
 ![COS](https://img.shields.io/badge/对象存储-腾讯云%20COS-0052d9)
+![Redisson](https://img.shields.io/badge/Redisson-3.17.7-c11d31)
+![WebSocket](https://img.shields.io/badge/WebSocket-协同编辑-6db33f)
 ![Frontend](https://img.shields.io/badge/前端-零依赖%20ES%20Module-success)
 
 把图片传上来、自动压好缩略图、过一遍审核，再按「**公共图库 / 私有空间 / 团队空间**」三套模型管理起来。
@@ -72,6 +74,8 @@
 | 空间分析 | 空间资源用量（容量/数量仪表盘）、分类分布（分组条形图）、标签词云、大小分段（饼图）、上传趋势（按天/周/月折线）；管理员可汇总全系统并查看空间使用排行（ECharts） |
 | 交互与观感 | 全屏图片查看器（滚轮/双击缩放、拖拽平移、键盘 ←→/±/f 与缩略图导航）、卡片悬停遮罩 + 快速操作、列表骨架屏、Toast 堆叠与进度条、滚动渐入、按钮涟漪；统一设计 token（色彩/阴影/圆角/缓动）与 :focus-visible 焦点环，动效遵循 prefers-reduced-motion |
 | 空间内图片 | 上传到指定空间（上传前校验数量、拿到真实体积后校验容量）、浏览、编辑、重传、删除，用量实时回填 |
+| 在线协同编辑 | 多人同时编辑同一张图（WebSocket + Disruptor），同一时刻仅一人持有编辑权，缩放/旋转实时广播给同图其他在线用户，编辑历史同步给中途加入者 |
+| 高并发治理 | 空间创建去重用 Redisson 分布式锁；单图查询前布隆过滤器预判防缓存穿透；上传/登录接口令牌桶限流 |
 | 用户管理 | 用户分页、按昵称/角色筛选、新增、编辑、删除（不能删自己） |
 | 前端体验 | hash 路由 + 视图懒加载、统一请求封装（自动解包 BaseResponse、40100 自动跳登录）、Toast / Modal / 分页等通用组件 |
 
@@ -86,6 +90,8 @@
 | 持久层 | MyBatis-Plus 3.5.9（含 `mybatis-plus-jsqlparser` 分页插件）、MySQL 8、逻辑删除、雪花 ID |
 | 分库分表 | ShardingSphere-JDBC 5.2.0（`picture` 按 `spaceId` 分表，团队空间一空间一表） |
 | 缓存 | Caffeine 3.1.8（本地一级）+ Redis / Spring Data Redis（分布式二级 + Sa-Token 会话） |
+| 分布式能力 | Redisson 3.17.7（分布式锁 RLock / 布隆过滤器 RBloomFilter / 限流器 RRateLimiter） |
+| 实时通信 | Spring WebSocket + LMAX Disruptor 3.4.4（在线协同编辑，消息异步消费） |
 | 对象存储 | 腾讯云 COS Java SDK 5.6.227 + 数据万象（上传即产出 webp 压缩图） |
 | 工具库 | Hutool 5.8.26（HTTP / 文件 / 日期）、jsoup 1.15.3（抓取解析）、Lombok |
 | 接口文档 | Knife4j 4.4.0（OpenAPI 2 / Swagger） |
@@ -111,17 +117,21 @@
                          │           │           │
               ┌──────────▼──┐  ┌─────▼─────┐  ┌──▼──────────────┐
               │  MySQL 8    │  │  Redis    │  │  腾讯云 COS      │
-              │  业务数据    │  │  列表缓存 │  │  原图 + 缩略图   │
+              │  业务数据    │  │  缓存     │  │  原图 + 缩略图   │
               └─────────────┘  └───────────┘  └─────────────────┘
                                      ▲
                           Caffeine 本地缓存（进程内一级）
 ```
 
-三条主要链路：
+> Redis 承载四类职责：列表缓存、Sa-Token 会话、Redisson（分布式锁 / 布隆过滤器 / 限流器）。
+```
+
+四条主要链路：
 
 1. **上传**：`Controller` 鉴权 → `Service` 组装入参（校验 / 空间归属 / 配额）→ `PictureUploadTemplate` 模板方法（校验 → 生成 key → 落临时文件 → 上传 COS → 封装结果 → 清理临时文件）→ 写库 → 维护空间用量 → 清缓存。
 2. **列表**：`/picture/list/page/vo`（普通查询）或 `/picture/list/page/vo/cache`（带缓存）→ Caffeine 命中即返回；未命中查 Redis；仍未命中查 MySQL 并回填两级缓存。
 3. **访问图片**：浏览器直接读 COS 地址（**前提：存储桶配置为公共读**，或改用 CDN / 临时签名 URL），后端只负责存储与元数据，不代理图片流量。
+4. **协同编辑**：浏览器建立 WebSocket（握手鉴权）→ 消息进 Disruptor RingBuffer 异步消费 → 编辑锁校验 → 广播给同图其他在线用户。
 
 ---
 
@@ -131,14 +141,17 @@
 .
 ├── src/main/java/com/lsj/demo
 │   ├── controller          # 接口层：user / picture / space / spaceUser / file
-│   │   └── aop             # 鉴权切面（@AuthCheck 全局角色、@SaCheckSpaceRole 空间角色）
+│   │   └── aop             # 鉴权/限流切面（@AuthCheck 全局角色、@SaSpaceCheckPermission 空间角色、@RateLimit 限流）
 │   ├── service             # 业务层接口与实现（含空间配额、缓存、审核逻辑）
-│   ├── config              # Sa-Token 集成（StpInterface 动态权限、拦截器注册）
-│   ├── annotation          # 自定义注解（AuthCheck、SaCheckSpaceRole）
+│   ├── websocket           # 在线协同编辑（Handler / Disruptor 生产者·消费者 / 握手拦截器）
+│   ├── conifg              # 配置类（Sa-Token、WebSocket、Disruptor、Redisson、Jackson）
+│   ├── annotation          # 自定义注解（AuthCheck、SaSpaceCheckPermission、RateLimit）
 │   ├── manager             # 外部能力封装
 │   │   ├── CosManager      # 对象存储：上传、压缩规则、按 url 反查 key 删除、设置 ACL
 │   │   ├── FileManager     # 早期上传实现（已废弃，保留对比）
+│   │   ├── PictureBloomFilter # 图片 id 布隆过滤器（防缓存穿透，启动回填）
 │   │   ├── factory         # 上传方式工厂（file / url）
+│   │   ├── sharding        # 动态分表管理（团队空间一空间一表）
 │   │   └── uplode          # 上传模板与两种实现（本地文件 / URL 下载）
 │   ├── mapper              # MyBatis-Plus Mapper
 │   ├── model
@@ -155,9 +168,9 @@
 ├── front/                  # 前端（原生 ES Module，详见 front/README.md）
 │   ├── js/{api,ui,app}.js  # 请求封装 / 通用组件 / 路由入口
 │   ├── js/views/           # 各页面（浏览、我的图片、我的空间、空间详情、管理端）
-│   ├── js/components/      # 上传、详情、编辑弹窗与图片压缩
+│   ├── js/components/      # 上传、详情、编辑弹窗、协同编辑（coEdit.js / pictureEditSocket.js）与图片压缩
 │   ├── server.js           # 零依赖静态服务器 + /api 代理
-│   └── smoke-test.mjs      # 模块冒烟检查；e2e-test.mjs 端到端回归
+│   ├── smoke-test.mjs      # 模块冒烟检查；e2e-test.mjs 端到端回归；concurrency-test.mjs 并发压测
 ├── sql/                    # 建表脚本（user / picture / space / space_user）
 ├── deploy/                 # Dockerfile 之外的部署资产：compose、mysql 初始化、nginx、.env 模板
 ├── docs/deploy.md          # 部署指南
@@ -242,6 +255,22 @@ processFile(输入, 文件) → 落地临时文件（本地转存 / 远程下载
 - 统一请求封装：自动解包 `BaseResponse`、携带 `credentials: 'include'` 维持登录态、`40100` 自动清理登录态并跳登录页；
 - 上传前用 canvas 压缩（超过 900KB 或 1600px 才压，优先 webp 以保留透明，浏览器不支持时退回 jpeg 并铺白底），压缩后仍超 2MB 本地直接拦下；
 - 所有渲染到页面的用户输入统一走 `escapeHtml`，避免存储型 XSS。
+
+### 10. 在线协同编辑：WebSocket + Disruptor
+
+- 连接地址 `ws://host:8666/api/ws/picture/edit?pictureId=xxx`，握手阶段 `WsHandshakeInterceptor` 校验登录态（`satoken` Cookie）+ 图片编辑权限（本人 / 管理员 / 团队空间 editor·admin 成员），不通过直接拒绝连接；
+- **编辑锁**：`ConcurrentHashMap.putIfAbsent(pictureId, userId)` 原子抢占，同一时刻一张图只有一个编辑者，抢锁失败的人收到 `ERROR` 提示；编辑者退出（`EXIT_EDIT`）或断开连接自动释放锁；
+- **异步解耦**：消息先丢进 Disruptor RingBuffer（`PictureEditEventProducer` → `PictureEditEventWorkHandler`），把处理从 WebSocket 收发线程里剥离，避免高频编辑动作阻塞连接；
+- **广播与历史**：缩放 / 旋转动作广播给同图其他在线用户（排除发送者，避免重复应用）；编辑历史记录在 `pictureEditRecodes`，中途加入的用户补发到最新状态；
+- 前端 `coEdit.js` / `pictureEditSocket.js` 用原生 WebSocket，零依赖，`ws://` 地址由 `__API_BASE__` 推导。
+
+### 11. 高并发治理：分布式锁 + 布隆过滤器 + 接口限流
+
+三项能力统一由 **Redisson** 支撑（与 Spring Data Redis 的 Lettuce 并存，各管各的连接）：
+
+- **分布式锁**：空间创建去重由本地 `synchronized` 升级为 `RLock.tryLock(3, 30, SECONDS)`，key 按用户隔离（`space:add:<userId>`）。本地锁只能锁单机，分布式锁保证「一账号每种类型一个空间」在集群部署下依然成立；
+- **布隆过滤器防缓存穿透**：`PictureBloomFilter` 基于 `RBloomFilter`——启动时经 ShardingSphere 数据源广播查询回填全量图片 id，上传时增量写入，`/picture/get`、`/picture/get/vo` 查询前先 `mightContain(id)` 预判，判定「一定不存在」直接短路不查库；**回填失败降级为直接查库**（`ready` 标志），绝不错杀合法查询；
+- **接口限流**：`@RateLimit` 注解 + `RateLimitAspect` 切面，基于 `RRateLimiter` 令牌桶（`RateType.OVERALL` 全局限流），挂在上传（10 次/分钟）与登录（30 次/分钟）接口；**Redis 不可用时限流降级放行**（fail-open），不让限流器变成单点故障。
 
 ---
 
@@ -419,6 +448,12 @@ UPDATE user SET userRole = 'admin' WHERE userAccount = '你的账号';
 | POST | `/file/test/upload` | 上传任意文件到对象存储 | 管理员 |
 | GET | `/file/test/download/` | 从对象存储下载 | 管理员 |
 
+### 在线协同编辑（WebSocket）
+
+| 类型 | 地址 | 说明 |
+| --- | --- | --- |
+| WS | `/ws/picture/edit?pictureId=xxx` | 建立连接（握手校验登录 + 图片编辑权限）。客户端发 `ENTER_EDIT` / `EXIT_EDIT` / `EDIT_ACTION`，服务端回 `INFO` / `ERROR` / `ENTER_EDIT` / `EXIT_EDIT` / `EDIT_ACTION` |
+
 ---
 
 ## 测试
@@ -445,6 +480,18 @@ API_BASE=http://localhost:8688/api node e2e-test.mjs   # 打其他后端地址
 `smoke-test.mjs` 搭了一个极简 DOM 桩真实加载所有模块，能查出语法、import 路径和首屏渲染阶段的运行时错误；
 `e2e-test.mjs` 覆盖登录与会话、雪花 ID 精度、分页 `total` 自洽、详情接口、上传体积边界，
 以及空间的完整链路（创建 → 列表 → 详情 → 上传到空间并校验用量累加 → 隔离校验 → 删除图片校验用量回落 → 重命名 → 删除）。
+
+### 并发压测（HTTP + WebSocket 编辑锁）
+
+```bash
+cd front
+node concurrency-test.mjs --users 5 --http 200                 # 一次性并发：5 人抢编辑权 + 200 并发请求
+node concurrency-test.mjs --http 200 --requests 100000         # keep-alive 持续压测：200 连接打 10 万请求
+```
+
+`concurrency-test.mjs` 零依赖（Node 内置 fetch / WebSocket），覆盖两块：HTTP 接口并发压测（统计成功率与延迟分布），
+以及协同编辑「编辑锁」并发——注册 N 个测试用户同时抢同一张图的编辑权，断言「恰 1 人成为编辑者、其余被拒」，并验证退出后锁能释放。
+每次运行自动把结果落盘到 `front/test-logs/`。
 
 ---
 
@@ -500,7 +547,8 @@ docker compose --env-file deploy/.env -f deploy/docker-compose.free.yml up -d --
 - **AI 图片编辑**：接入多模态模型，支持以文生图、局部重绘、智能扩图，并保留编辑历史可回滚
 - **图库分析**：图片内容自动打标与聚类，输出分类分布、上传趋势、存储占用等可视化报表
 - **团队空间增强**：空间级别的配额分配、成员操作审计日志、@提及与消息通知
-- **图片协同编辑**：多人同时编辑图片信息与标签，基于 WebSocket 做实时同步与冲突处理
+- **消息队列异步化**：审核通知、缩略图异步生成、空间用量异步结算，引入 MQ 削峰解耦
+- **全文检索**：图片名称 / 标签 / 简介接入 Elasticsearch，替代 MySQL LIKE 模糊查询
 
 ---
 
