@@ -137,6 +137,12 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
         if (!result) {
             throw new BusinessException(ErrorCode.OPERATION_ERROR, "昵称修改失败");
         }
+        // 同步刷新会话里的 User 快照，否则 getLoginUser 改为快照优先后会一直返回旧昵称
+        try {
+            StpKit.SPACE.getSession().set(USER_LOGIN_STATE, this.getById(userId));
+        } catch (Exception ignored) {
+            // 无请求上下文（如单元测试 / 异步任务）时忽略，快照会在下次登录时刷新
+        }
         return true;
     }
 
@@ -209,7 +215,12 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
         // 登录态由 space 这套 Sa-Token 会话管理：未登录会抛 NotLoginException，
         // 由全局异常处理器统一转成 NOT_LOGIN_ERROR，前端无需感知实现差异。
         long userId = StpKit.SPACE.getLoginIdAsLong();
-        User currentUser = this.getById(userId);
+        // 优先读会话里的 User 快照（登录时已写入），避免每次查库；
+        // 会话里没有（旧 token / 快照被清理）再退化查库
+        User currentUser = (User) StpKit.SPACE.getSession().get(USER_LOGIN_STATE);
+        if (currentUser == null) {
+            currentUser = this.getById(userId);
+        }
         ThrowUtils.throwIf(currentUser == null, ErrorCode.NOT_LOGIN_ERROR, "未登录");
         return currentUser;
     }
@@ -225,7 +236,11 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
         // 未登录时返回 null 而不抛异常，供「登录可见全部、未登录只看公开内容」的接口使用
         try {
             long userId = StpKit.SPACE.getLoginIdAsLong();
-            return this.getById(userId);
+            User currentUser = (User) StpKit.SPACE.getSession().get(USER_LOGIN_STATE);
+            if (currentUser == null) {
+                currentUser = this.getById(userId);
+            }
+            return currentUser;
         } catch (Exception e) {
             // 未登录或 token 失效都返回 null
             return null;

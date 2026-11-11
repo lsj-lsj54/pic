@@ -7,6 +7,7 @@ import {
   getFormValues, formatTime, formatSize, CATEGORY_OPTIONS, debounce,
 } from '../ui.js';
 import { openLightbox } from './lightbox.js';
+import { openCoEdit } from './coEdit.js';
 
 /** 允许上传的后端格式，须与 FileManager.validPicture 保持一致 */
 const ALLOW_FORMAT = ['jpg', 'jpeg', 'png', 'webp'];
@@ -538,6 +539,7 @@ export async function openPictureDetail(id, { onChanged } = {}) {
             <a class="btn btn-sm" href="${escapeHtml(originUrl(picture))}" target="_blank" rel="noopener">查看原图</a>
             ${editable ? '<button class="btn btn-sm btn-primary" id="detail-edit" type="button">编辑信息</button>' : ''}
             ${editable ? '<button class="btn btn-sm" id="detail-reupload" type="button">重新上传</button>' : ''}
+            ${editable ? '<button class="btn btn-sm" id="detail-coedit" type="button">在线编辑</button>' : ''}
           </div>
         </div>
       </div>`,
@@ -574,6 +576,13 @@ export async function openPictureDetail(id, { onChanged } = {}) {
         spaceId: picture.spaceId,
         onSuccess: onChanged,
       });
+    });
+  }
+  const coeditBtn = $('#detail-coedit', modal);
+  if (coeditBtn) {
+    coeditBtn.addEventListener('click', () => {
+      closeModal();
+      openCoEdit(picture);
     });
   }
 }

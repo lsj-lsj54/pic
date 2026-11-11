@@ -25,7 +25,7 @@ public class SpaceUserAuthManager {
     public static final SpaceUserAuthConfig SPACE_USER_AUTH_CONFIG;
 
     static {
-        String json = ResourceUtil.readUtf8Str("all/spaceUserAuthConfig.json");
+        String json = ResourceUtil.readUtf8Str("all/SpaceUserAuthConfig.json");
         SPACE_USER_AUTH_CONFIG = JSONUtil.toBean(json, SpaceUserAuthConfig.class);
     }
 

@@ -10,6 +10,8 @@ application-local.yml
 # 部署用的环境变量文件（含密码、密钥），只提交 .env.example
 .env
 deploy/.env
+# 并发测试日志（每次运行自动生成）
+front/test-logs/
 
 
 ### STS ###

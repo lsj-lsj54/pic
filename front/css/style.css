@@ -2439,3 +2439,50 @@ body.no-scroll {
 .card-badge {
   z-index: 3;
 }
+
+/* ------------------------------ 图片在线协同编辑 ------------------------------ */
+.coedit-stage {
+  position: relative;
+  height: 420px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: repeating-conic-gradient(#f1f1f1 0% 25%, #e6e6e6 0% 50%) 0 0 / 20px 20px;
+  border-radius: 10px;
+}
+
+.coedit-img {
+  max-width: 100%;
+  max-height: 100%;
+  transform-origin: center center;
+  transition: transform 0.18s ease;
+  will-change: transform;
+}
+
+.coedit-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+  margin: 14px 0 6px;
+}
+
+.coedit-status {
+  min-height: 1.4em;
+  margin: 6px 0 2px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-sub);
+}
+
+.coedit-status.is-error {
+  color: var(--danger);
+}
+
+.coedit-hint {
+  margin: 4px 0 0;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-weak);
+}

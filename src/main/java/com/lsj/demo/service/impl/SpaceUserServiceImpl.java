@@ -164,7 +164,7 @@ public class SpaceUserServiceImpl extends ServiceImpl<SpaceUserMapper, SpaceUser
         }
         // 批量查空间信息，成员表只关联团队空间，但空间可能被删，查不到的要跳过
         Set<Long> spaceIdSet = spaceUserList.stream().map(SpaceUser::getSpaceId).collect(Collectors.toSet());
-        Map<Long, List<Space>> spaceIdSpaceListMap = spaceMapper.selectBatchIds(spaceIdSet).stream()
+        Map<Long, List<Space>> spaceIdSpaceListMap = spaceMapper.selectByIds(spaceIdSet).stream()
                 .collect(Collectors.groupingBy(Space::getId));
         // 用户信息即当前登录用户，逐条填充即可，无需再查库
         return spaceUserList.stream().map(spaceUser -> {
